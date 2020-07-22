@@ -138,7 +138,7 @@ namespace atbus {
 
         ret->owner_   = owner;
         if(node_access_controller::add_ping_timer(*owner, ret, ret->ping_timer_)) {
-            ret->set_flag(flag_t::HAS_PING_TIMER, true);
+            ret->set_flag(::atbus::protocol::ATBUS_ENDPOINT_FLAG_HAS_PING_TIMER, true);
         }
         ret->watcher_ = ret;
 
@@ -171,17 +171,17 @@ namespace atbus {
             ATBUS_FUNC_NODE_DEBUG(*owner_, this, NULL, NULL, "endpoint deallocated");
         }
 
-        flags_.set(flag_t::DESTRUCTING, true);
+        flags_.set(::atbus::protocol::ATBUS_ENDPOINT_FLAG_DESTRUCTING, true);
 
         reset();
     }
 
     ATBUS_MACRO_API void endpoint::reset() {
         // 这个函数可能会在析构时被调用，这时候不能使用watcher_.lock()
-        if (flags_.test(flag_t::RESETTING)) {
+        if (flags_.test(::atbus::protocol::ATBUS_ENDPOINT_FLAG_RESETTING)) {
             return;
         }
-        flags_.set(flag_t::RESETTING, true);
+        flags_.set(::atbus::protocol::ATBUS_ENDPOINT_FLAG_RESETTING, true);
 
         // 需要临时给自身加引用计数，否则后续移除的过程中可能导致数据被提前释放
         ptr_t tmp_holder = watch();
@@ -276,7 +276,7 @@ namespace atbus {
             return false;
         }
 
-        if (flags_.test(flag_t::RESETTING)) {
+        if (flags_.test(::atbus::protocol::ATBUS_ENDPOINT_FLAG_RESETTING)) {
             return false;
         }
 
@@ -290,7 +290,7 @@ namespace atbus {
 
         if (force_data || ctrl_conn_) {
             data_conn_.push_back(conn->watch());
-            flags_.set(flag_t::CONNECTION_SORTED, false); // 置为未排序状态
+            flags_.set(::atbus::protocol::ATBUS_ENDPOINT_FLAG_CONNECTION_SORTED, false); // 置为未排序状态
         } else {
             ctrl_conn_ = conn->watch();
         }
@@ -311,7 +311,7 @@ namespace atbus {
         assert(this == conn->binding_);
 
         // 重置流程会在reset里清理对象，不需要再进行一次查找
-        if (flags_.test(flag_t::RESETTING)) {
+        if (flags_.test(::atbus::protocol::ATBUS_ENDPOINT_FLAG_RESETTING)) {
             conn->binding_ = NULL;
             return true;
         }
@@ -358,7 +358,7 @@ namespace atbus {
     }
 
     ATBUS_MACRO_API bool endpoint::get_flag(flag_t::type f) const {
-        if (f >= flag_t::MAX) {
+        if (f >= ::atbus::protocol::ATBUS_ENDPOINT_FLAG_TYPE_ARRAYSIZE) {
             return false;
         }
 
@@ -366,7 +366,7 @@ namespace atbus {
     }
 
     ATBUS_MACRO_API int endpoint::set_flag(flag_t::type f, bool v) {
-        if (f >= flag_t::MAX || f < flag_t::MUTABLE_FLAGS) {
+        if (f >= ::atbus::protocol::ATBUS_ENDPOINT_FLAG_TYPE_ARRAYSIZE || f < ::atbus::protocol::ATBUS_ENDPOINT_FLAG_MUTABLE_FLAGS) {
             return EN_ATBUS_ERR_PARAMS;
         }
 
@@ -378,7 +378,7 @@ namespace atbus {
     ATBUS_MACRO_API uint32_t endpoint::get_flags() const { return static_cast<uint32_t>(flags_.to_ulong()); }
 
     ATBUS_MACRO_API endpoint::ptr_t endpoint::watch() const {
-        if (flags_.test(flag_t::DESTRUCTING) || watcher_.expired()) {
+        if (flags_.test(::atbus::protocol::ATBUS_ENDPOINT_FLAG_DESTRUCTING) || watcher_.expired()) {
             return endpoint::ptr_t();
         }
 
@@ -393,9 +393,9 @@ namespace atbus {
         }
 
         if (0 == UTIL_STRFUNC_STRNCASE_CMP("mem:", addr.c_str(), 4) || 0 == UTIL_STRFUNC_STRNCASE_CMP("shm:", addr.c_str(), 4)) {
-            flags_.set(flag_t::HAS_LISTEN_PORC, true);
+            flags_.set(::atbus::protocol::ATBUS_ENDPOINT_FLAG_HAS_LISTEN_PORC, true);
         } else {
-            flags_.set(flag_t::HAS_LISTEN_FD, true);
+            flags_.set(::atbus::protocol::ATBUS_ENDPOINT_FLAG_HAS_LISTEN_FD, true);
         }
 
         listen_address_.push_back(addr);
@@ -408,22 +408,22 @@ namespace atbus {
 
         clear_ping_timer();
 
-        if (flags_.test(flag_t::RESETTING)) {
+        if (flags_.test(::atbus::protocol::ATBUS_ENDPOINT_FLAG_RESETTING)) {
             return;
         }
 
         if(node_access_controller::add_ping_timer(*owner_, watch(), ping_timer_)) {
-            set_flag(flag_t::HAS_PING_TIMER, true);
+            set_flag(::atbus::protocol::ATBUS_ENDPOINT_FLAG_HAS_PING_TIMER, true);
         }
     }
 
     ATBUS_MACRO_API void endpoint::clear_ping_timer() {
-        if (NULL == owner_ || false == get_flag(flag_t::HAS_PING_TIMER)) {
+        if (NULL == owner_ || false == get_flag(::atbus::protocol::ATBUS_ENDPOINT_FLAG_HAS_PING_TIMER)) {
             return;
         }
 
         node_access_controller::remove_ping_timer(*owner_, ping_timer_);
-        set_flag(flag_t::HAS_PING_TIMER, false);
+        set_flag(::atbus::protocol::ATBUS_ENDPOINT_FLAG_HAS_PING_TIMER, false);
     }
 
     bool endpoint::sort_connection_cmp_fn(const connection::ptr_t &left, const connection::ptr_t &right) {
@@ -481,9 +481,9 @@ namespace atbus {
         }
 
         // 按性能优先级排序mem>shm>fd
-        if (false == ep->flags_.test(flag_t::CONNECTION_SORTED)) {
+        if (false == ep->flags_.test(::atbus::protocol::ATBUS_ENDPOINT_FLAG_CONNECTION_SORTED)) {
             ep->data_conn_.sort(sort_connection_cmp_fn);
-            ep->flags_.set(flag_t::CONNECTION_SORTED, true);
+            ep->flags_.set(::atbus::protocol::ATBUS_ENDPOINT_FLAG_CONNECTION_SORTED, true);
         }
 
         for (std::list<connection::ptr_t>::iterator iter = ep->data_conn_.begin(); iter != ep->data_conn_.end(); ++iter) {
@@ -511,7 +511,8 @@ namespace atbus {
         }
     }
 
-    endpoint::stat_t::stat_t() : fault_count(0), unfinished_ping(0), ping_delay(0), last_pong_time(0), created_time_sec(0), created_time_usec(0) {}
+    endpoint::stat_t::stat_t() : fault_count(0), unfinished_ping(0), ping_delay(0), 
+        last_pong_time(endpoint::clock_type::from_time_t(0)), created_time(endpoint::clock_type::from_time_t(0)) {}
 
     /** 增加错误计数 **/
     ATBUS_MACRO_API size_t endpoint::add_stat_fault() { return ++stat_.fault_count; }
@@ -523,14 +524,14 @@ namespace atbus {
 
     ATBUS_MACRO_API uint64_t endpoint::get_stat_ping() const { return stat_.unfinished_ping; }
 
-    ATBUS_MACRO_API void endpoint::set_stat_ping_delay(time_t pd, time_t pong_tm) {
+    ATBUS_MACRO_API void endpoint::set_stat_ping_delay(duration_t pd, timepoint_t pong_tm) {
         stat_.ping_delay     = pd;
         stat_.last_pong_time = pong_tm;
     }
 
-    ATBUS_MACRO_API time_t endpoint::get_stat_ping_delay() const { return stat_.ping_delay; }
+    ATBUS_MACRO_API endpoint::duration_t endpoint::get_stat_ping_delay() const { return stat_.ping_delay; }
 
-    ATBUS_MACRO_API time_t endpoint::get_stat_last_pong() const { return stat_.last_pong_time; }
+    ATBUS_MACRO_API endpoint::timepoint_t endpoint::get_stat_last_pong() const { return stat_.last_pong_time; }
 
     ATBUS_MACRO_API size_t endpoint::get_stat_push_start_times() const {
         size_t ret = 0;
@@ -652,24 +653,13 @@ namespace atbus {
         return ret;
     }
 
-    ATBUS_MACRO_API time_t endpoint::get_stat_created_time_sec() {
-        if (likely(stat_.created_time_sec > 0)) {
-            return stat_.created_time_sec;
+    ATBUS_MACRO_API endpoint::timepoint_t endpoint::get_stat_created_time() {
+        if (likely(stat_.created_time > clock_type::from_time_t(0))) {
+            return stat_.created_time;
         }
 
-        stat_.created_time_sec = owner_->get_timer_sec();
-        stat_.created_time_usec = owner_->get_timer_usec();
-        return stat_.created_time_sec;
-    }
-
-    ATBUS_MACRO_API time_t endpoint::get_stat_created_time_usec() {
-        if (likely(stat_.created_time_sec > 0)) {
-            return stat_.created_time_usec;
-        }
-
-        stat_.created_time_sec = owner_->get_timer_sec();
-        stat_.created_time_usec = owner_->get_timer_usec();
-        return stat_.created_time_usec;
+        stat_.created_time = owner_->get_timer();
+        return stat_.created_time;
     }
 
     ATBUS_MACRO_API const node *endpoint::get_owner() const { return owner_; }

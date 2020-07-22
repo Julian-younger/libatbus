@@ -131,13 +131,13 @@ namespace atbus {
         memset(&stat_, 0, sizeof(stat_));
     }
 
-    ATBUS_MACRO_API int connection::proc(node &n, time_t sec, time_t usec) {
+    ATBUS_MACRO_API int connection::proc(node &n, const timepoint_t& timer) {
         if (state_t::CONNECTED != state_) {
             return 0;
         }
 
         if (NULL != conn_data_.proc_fn) {
-            return conn_data_.proc_fn(n, *this, sec, usec);
+            return conn_data_.proc_fn(n, *this, timer);
         }
 
         return 0;
@@ -698,7 +698,7 @@ namespace atbus {
     }
 
 #ifdef ATBUS_CHANNEL_SHM
-    ATBUS_MACRO_API int connection::shm_proc_fn(node &n, connection &conn, time_t /*sec*/, time_t /*usec*/) {
+    ATBUS_MACRO_API int connection::shm_proc_fn(node &n, connection &conn, const timepoint_t& /**timer**/) {
         int ret                             = 0;
         size_t left_times                   = n.get_conf().loop_times;
         detail::buffer_block *static_buffer = n.get_temp_static_buffer();
@@ -763,7 +763,7 @@ namespace atbus {
     }
 #endif
 
-    ATBUS_MACRO_API int connection::mem_proc_fn(node &n, connection &conn, time_t /*sec*/, time_t /*usec*/) {
+    ATBUS_MACRO_API int connection::mem_proc_fn(node &n, connection &conn, const timepoint_t& /**timer**/) {
         int ret                             = 0;
         size_t left_times                   = n.get_conf().loop_times;
         detail::buffer_block *static_buffer = n.get_temp_static_buffer();

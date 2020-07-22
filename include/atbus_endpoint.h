@@ -38,12 +38,21 @@ namespace atbus {
     namespace detail {
         template <typename TKey, typename TVal>
         struct auto_select_map {
+#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
+            using type = ATBUS_ADVANCE_TYPE_MAP(TKey, TVal);
+#else
             typedef ATBUS_ADVANCE_TYPE_MAP(TKey, TVal) type;
+#endif
         };
 
         template <typename TVal>
         struct auto_select_set {
+            
+#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
+            using type = ATBUS_ADVANCE_TYPE_SET(TVal);
+#else
             typedef ATBUS_ADVANCE_TYPE_SET(TVal) type;
+#endif
         };
     } // namespace detail
 
@@ -95,10 +104,27 @@ namespace atbus {
 
     class endpoint UTIL_CONFIG_FINAL : public util::design_pattern::noncopyable {
     public:
+#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
+        using clock_type = connection::clock_type;
+        using timepoint_t = connection::timepoint_t;
+        using duration_t = connection::duration_t;
+
+        using ptr_t = std::shared_ptr<endpoint>;
+        using bus_id_t = ATBUS_MACRO_BUSID_TYPE;
+
+        struct flag_t {
+            using type = ::atbus::protocol::ATBUS_ENDPOINT_FLAG_TYPE ;
+        };
+#else
+        typedef connection::clock_type clock_type;
+        typedef connection::timepoint_t timepoint_t;
+        typedef connection::duration_t duration_t;
+
         typedef ATBUS_MACRO_BUSID_TYPE bus_id_t;
         typedef std::shared_ptr<endpoint> ptr_t;
 
         struct flag_t {
+            typedef ::atbus::protocol::ATBUS_ENDPOINT_FLAG_TYPE type;
             enum type {
                 RESETTING, /** 正在执行重置（防止递归死循环） **/
                 CONNECTION_SORTED,
@@ -111,6 +137,9 @@ namespace atbus {
                 MAX
             };
         };
+#endif
+
+
 
         typedef connection *(endpoint::*get_connection_fn_t)(endpoint *ep) const;
 
@@ -206,11 +235,11 @@ namespace atbus {
 
         ATBUS_MACRO_API uint64_t get_stat_ping() const;
 
-        ATBUS_MACRO_API void set_stat_ping_delay(time_t pd, time_t pong_tm);
+        ATBUS_MACRO_API void set_stat_ping_delay(duration_t pd, timepoint_t pong_tm);
 
-        ATBUS_MACRO_API time_t get_stat_ping_delay() const;
+        ATBUS_MACRO_API duration_t get_stat_ping_delay() const;
 
-        ATBUS_MACRO_API time_t get_stat_last_pong() const;
+        ATBUS_MACRO_API timepoint_t get_stat_last_pong() const;
 
         ATBUS_MACRO_API size_t get_stat_push_start_times() const;
         ATBUS_MACRO_API size_t get_stat_push_start_size() const;
@@ -221,8 +250,7 @@ namespace atbus {
         ATBUS_MACRO_API size_t get_stat_pull_times() const;
         ATBUS_MACRO_API size_t get_stat_pull_size() const;
 
-        ATBUS_MACRO_API time_t get_stat_created_time_sec();
-        ATBUS_MACRO_API time_t get_stat_created_time_usec();
+        ATBUS_MACRO_API timepoint_t get_stat_created_time();
 
         ATBUS_MACRO_API const node *get_owner() const;
 
@@ -237,7 +265,7 @@ namespace atbus {
         bus_id_t id_;
         std::string hash_code_;
         std::vector<endpoint_subnet_range> subnets_;
-        std::bitset<flag_t::MAX> flags_;
+        std::bitset<::atbus::protocol::ATBUS_ENDPOINT_FLAG_TYPE_ARRAYSIZE> flags_;
         std::string hostname_;
         int32_t pid_;
 
@@ -254,10 +282,9 @@ namespace atbus {
         struct stat_t {
             size_t fault_count;       // 错误容忍计数
             uint64_t unfinished_ping; // 上一次未完成的ping的序号
-            time_t ping_delay;
-            time_t last_pong_time; // 上一次接到PONG包时间
-            time_t created_time_sec;
-            time_t created_time_usec;
+            duration_t ping_delay;
+            timepoint_t last_pong_time; // 上一次接到PONG包时间
+            timepoint_t created_time;
             stat_t();
         };
         stat_t stat_;

@@ -80,6 +80,11 @@ namespace atbus {
         recv_buffer_size = other.recv_buffer_size;
         send_buffer_size = other.send_buffer_size;
         send_buffer_number = other.send_buffer_number;
+        endpoint_buffer_size = other.endpoint_buffer_size;
+        endpoint_buffer_number = other.endpoint_buffer_number;
+        endpoint_buffer_timeout = other.endpoint_buffer_timeout;
+        endpoint_retry_times = other.endpoint_retry_times;
+        endpoint_buffer_retry_interval = other.endpoint_buffer_retry_interval;
 
         return *this;
     }
@@ -114,10 +119,8 @@ namespace atbus {
 
 
     node::node() : state_(state_t::CREATED), ev_loop_(NULL), static_buffer_(NULL), on_debug(NULL) {
-        event_timer_.sec                   = 0;
-        event_timer_.usec                  = 0;
-        event_timer_.node_sync_push        = 0;
-        event_timer_.parent_opr_time_point = 0;
+        event_timer_.timer                 = clock_type::from_time_t(0);
+        event_timer_.parent_opr_time_point = clock_type::from_time_t(0);
         random_engine_.init_seed(static_cast<uint64_t>(time(NULL)));
 
         flags_.reset();
@@ -137,15 +140,16 @@ namespace atbus {
         conf->subnets.clear();
         conf->flags.reset();
         conf->parent_address.clear();
-        conf->loop_times    = 128;
-        conf->ttl           = 16; // 默认最长8次跳转
-        conf->protocol_version = atbus::protocol::ATBUS_PROTOCOL_VERSION;
+
+        conf->loop_times               = 128;
+        conf->ttl                      = 16; // 默认最长8次跳转
+        conf->protocol_version         = atbus::protocol::ATBUS_PROTOCOL_VERSION;
         conf->protocol_minimal_version = atbus::protocol::ATBUS_PROTOCOL_MINIMAL_VERSION;
 
-        conf->first_idle_timeout = ATBUS_MACRO_CONNECTION_CONFIRM_TIMEOUT;
-        conf->ping_interval      = 8; // 默认ping包间隔为8s
-        conf->retry_interval     = 3;
-        conf->fault_tolerant = 2; // 允许最多失败2次，第3次直接失败，默认配置里3次ping包无响应则是最多24s可以发现节点下线
+        conf->first_idle_timeout      = std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::seconds(ATBUS_MACRO_CONNECTION_CONFIRM_TIMEOUT));
+        conf->ping_interval           = std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::seconds(8)); // 默认ping包间隔为8s
+        conf->retry_interval          = std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::seconds(3));
+        conf->fault_tolerant          = 2; // 允许最多失败2次，第3次直接失败，默认配置里3次ping包无响应则是最多24s可以发现节点下线
         conf->backlog                 = ATBUS_MACRO_CONNECTION_BACKLOG;
         conf->access_token_max_number = 5;
         conf->access_tokens.clear();
@@ -156,8 +160,13 @@ namespace atbus {
         conf->recv_buffer_size = ATBUS_MACRO_SHM_MEM_CHANNEL_LENGTH;
 
         // send_buffer_size 用于IO流通道的发送缓冲区长度，远程节点可能数量很多所以设的小一点
-        conf->send_buffer_size   = ATBUS_MACRO_IOS_SEND_BUFFER_LENGTH;
-        conf->send_buffer_number = 0; // 默认不使用静态缓冲区，所以设为0
+        conf->send_buffer_size       = ATBUS_MACRO_IOS_SEND_BUFFER_LENGTH;
+        conf->send_buffer_number     = 0; // 默认不使用静态缓冲区，所以设为0
+        conf->endpoint_buffer_size   = ATBUS_MACRO_IOS_SEND_BUFFER_LENGTH; // 默认不使用静态缓冲区，所以设为0
+        conf->endpoint_buffer_number = 0; // 默认不限制包个数
+        conf->endpoint_buffer_timeout = std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::seconds(5));
+        conf->endpoint_retry_times = 5;
+        conf->endpoint_buffer_retry_interval = std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::milliseconds(512));
     }
 
     ATBUS_MACRO_API void node::default_conf(start_conf_t *conf) {
@@ -165,8 +174,7 @@ namespace atbus {
             return;
         }
 
-        conf->timer_sec = 0;
-        conf->timer_usec = 0;
+        conf->timer = clock_type::from_time_t(0);
     }
 
     ATBUS_MACRO_API node::ptr_t node::create() {
@@ -230,13 +238,11 @@ namespace atbus {
         }
 
         // 初始化时间
-        if (0 == start_conf.timer_sec && 0 == start_conf.timer_usec) {
+        if (clock_type::from_time_t(0) == start_conf.timer) {
             util::time::time_utility::update();
-            event_timer_.sec = util::time::time_utility::get_sys_now();
-            event_timer_.usec = util::time::time_utility::get_now_usec();
+            event_timer_.timer = util::time::time_utility::now();
         } else {
-            event_timer_.sec = start_conf.timer_sec;
-            event_timer_.usec = start_conf.timer_usec;
+            event_timer_.timer = start_conf.timer;
         }
 
         init_hash_code();
@@ -249,10 +255,10 @@ namespace atbus {
             if (!node_parent_.node_) {
                 // 如果父节点被激活了，那么父节点操作时间必须更新到非0值，以启用这个功能
                 if (connect(conf_.parent_address.c_str()) >= 0) {
-                    event_timer_.parent_opr_time_point = event_timer_.sec + conf_.first_idle_timeout;
+                    event_timer_.parent_opr_time_point = event_timer_.timer + conf_.first_idle_timeout;
                     state_                             = state_t::CONNECTING_PARENT;
                 } else {
-                    event_timer_.parent_opr_time_point = event_timer_.sec + conf_.retry_interval;
+                    event_timer_.parent_opr_time_point = event_timer_.timer + conf_.retry_interval;
                     state_                             = state_t::LOST_PARENT;
                 }
             }
@@ -389,16 +395,17 @@ namespace atbus {
     }
 
     ATBUS_MACRO_API int node::proc(time_t sec, time_t usec) {
+        return proc(clock_type::from_time_t(sec) + std::chrono::microseconds(usec));
+    }
+
+    ATBUS_MACRO_API int node::proc(const timepoint_t& timer) {
         flag_guard_t fgd_proc(this, flag_t::EN_FT_IN_PROC);
         if (!fgd_proc) {
             return 0;
         }
 
-        if (sec > event_timer_.sec) {
-            event_timer_.sec  = sec;
-            event_timer_.usec = usec;
-        } else if (sec == event_timer_.sec && usec > event_timer_.usec) {
-            event_timer_.usec = usec;
+        if (timer > event_timer_.timer) {
+            event_timer_.timer = timer;
         }
 
         if (state_t::CREATED == state_) {
@@ -417,8 +424,10 @@ namespace atbus {
         // 点对点IO流通道
         for (detail::auto_select_map<std::string, connection::ptr_t>::type::iterator iter = proc_connections_.begin();
              iter != proc_connections_.end(); ++iter) {
-            ret += iter->second->proc(*this, sec, usec);
+            ret += iter->second->proc(*this, timer);
         }
+
+        timepoint_t zero_timepoint = clock_type::from_time_t(0);
 
         // connection超时下线
         while (!event_timer_.connecting_list.empty()) {
@@ -438,7 +447,7 @@ namespace atbus {
                 continue;
             }
 
-            if (iter->first >= sec) {
+            if (iter->first >= timer) {
                 break;
             }
 
@@ -456,7 +465,7 @@ namespace atbus {
         }
 
         // 父节点操作
-        if (!conf_.parent_address.empty() && 0 != event_timer_.parent_opr_time_point && event_timer_.parent_opr_time_point < sec) {
+        if (!conf_.parent_address.empty() && zero_timepoint != event_timer_.parent_opr_time_point && event_timer_.parent_opr_time_point < timer) {
             // 获取命令节点
             connection *ctl_conn = NULL;
             if (node_parent_.node_ && self_) {
@@ -469,14 +478,14 @@ namespace atbus {
                 if (res < 0) {
                     ATBUS_FUNC_NODE_ERROR(*this, NULL, NULL, res, 0);
 
-                    event_timer_.parent_opr_time_point = sec + conf_.retry_interval;
+                    event_timer_.parent_opr_time_point = timer + conf_.retry_interval;
                 } else {
                     // 下一次判定父节点连接超时再重新连接
-                    event_timer_.parent_opr_time_point = sec + conf_.first_idle_timeout;
+                    event_timer_.parent_opr_time_point = timer + conf_.first_idle_timeout;
                     state_                             = state_t::CONNECTING_PARENT;
                 }
             } else {
-                if (node_parent_.node_ && !node_parent_.node_->is_available() && node_parent_.node_->get_stat_created_time_sec() + conf_.first_idle_timeout < sec) {
+                if (node_parent_.node_ && !node_parent_.node_->is_available() && node_parent_.node_->get_stat_created_time() + conf_.first_idle_timeout < timer) {
                     add_endpoint_gc_list(node_parent_.node_);
                 } else {
                     int res = ping_endpoint(*node_parent_.node_);
@@ -486,7 +495,7 @@ namespace atbus {
                 }
 
                 // ping包不需要重试
-                event_timer_.parent_opr_time_point = sec + conf_.ping_interval;
+                event_timer_.parent_opr_time_point = timer + conf_.ping_interval;
             }
         }
 
@@ -499,8 +508,8 @@ namespace atbus {
                 }
 
                 timer_desc_ls<std::weak_ptr<endpoint> >::type::iterator timer_iter = event_timer_.ping_list.begin();
-                time_t timeout_tick = timer_iter->first;
-                if (timeout_tick > sec) {
+                timepoint_t timeout_tick = timer_iter->first;
+                if (timeout_tick > timer) {
                     break;
                 }
 
@@ -509,7 +518,7 @@ namespace atbus {
                 }
 
                 // Ping 前检测有效性，如果超出最大首次空闲时间后还处于不可用状态（没有数据连接），可能是等待对方连接超时。这时候需要踢下线
-                if (next_ep && !next_ep->is_available() && next_ep->get_stat_created_time_sec() + conf_.first_idle_timeout < sec) {
+                if (next_ep && !next_ep->is_available() && next_ep->get_stat_created_time() + conf_.first_idle_timeout < timer) {
                     add_endpoint_gc_list(next_ep);
                     // 多追加一次，以防万一状态错误能够自动恢复或则再次回收
                     // 正常是不会触发这次的定时器的，一会回收的时候会删除掉
@@ -532,8 +541,8 @@ namespace atbus {
                     break;
                 }
 
-                time_t next_tick = event_timer_.ping_list.front().first;
-                if (next_tick > sec) {
+                timepoint_t next_tick = event_timer_.ping_list.front().first;
+                if (next_tick > timer) {
                     break;
                 }
 
@@ -553,19 +562,6 @@ namespace atbus {
                 }
             }
         }
-
-#if 0 // disabled
-        // 节点同步协议-推送
-        if (0 != event_timer_.node_sync_push && event_timer_.node_sync_push < sec) {
-            // 发起子节点同步信息推送
-            int res = push_node_sync();
-            if (res < 0) {
-                event_timer_.node_sync_push = sec + conf_.retry_interval;
-            } else {
-                event_timer_.node_sync_push = 0;
-            }
-        }
-#endif
 
         // dispatcher all self msgs
         ret += dispatch_all_self_msgs();
@@ -1393,7 +1389,7 @@ namespace atbus {
 
         // 如果处于握手阶段，发送节点关系逻辑并加入握手连接池并加入超时判定池
         if (false == conn->is_connected()) {
-            out = event_timer_.connecting_list.insert(event_timer_.connecting_list.end(), std::make_pair(event_timer_.sec + conf_.first_idle_timeout, conn));
+            out = event_timer_.connecting_list.insert(event_timer_.connecting_list.end(), std::make_pair(event_timer_.timer + conf_.first_idle_timeout, conn));
         }
 
         return true;
@@ -1418,9 +1414,7 @@ namespace atbus {
         return event_timer_.connecting_list.size();
     }
 
-    ATBUS_MACRO_API time_t node::get_timer_sec() const { return event_timer_.sec; }
-
-    ATBUS_MACRO_API time_t node::get_timer_usec() const { return event_timer_.usec; }
+    ATBUS_MACRO_API node::timepoint_t node::get_timer() const { return event_timer_.timer; }
 
     ATBUS_MACRO_API void node::on_recv(connection *conn, ::atbus::protocol::msg ATBUS_MACRO_RVALUE_REFERENCES m, int status, int errcode) {
         if (status < 0 || errcode < 0) {
@@ -1511,7 +1505,7 @@ namespace atbus {
             state_ = state_t::LOST_PARENT;
 
             // set reconnect to parent into retry interval
-            event_timer_.parent_opr_time_point = get_timer_sec() + conf_.retry_interval;
+            event_timer_.parent_opr_time_point = get_timer() + conf_.retry_interval;
 
             // if not activited, shutdown
             if (!flags_.test(flag_t::EN_FT_ACTIVED)) {
@@ -1590,7 +1584,7 @@ namespace atbus {
         flags_.set(flag_t::EN_FT_PARENT_REG_DONE, true);
 
         // 父节点成功上线以后要更新一下父节点action定时器。以便能够及时发起第一个ping包
-        time_t ping_timepoint = get_timer_sec() + conf_.ping_interval;
+        timepoint_t ping_timepoint = get_timer() + conf_.ping_interval;
         if (ping_timepoint < event_timer_.parent_opr_time_point) {
             event_timer_.parent_opr_time_point = ping_timepoint;
         }
@@ -2035,7 +2029,7 @@ namespace atbus {
             return false;
         }
 
-        if (conf_.ping_interval <= 0) {
+        if (conf_.ping_interval <= duration_t::zero()) {
             out = event_timer_.ping_list.end();
             return false;
         }
@@ -2045,7 +2039,7 @@ namespace atbus {
             return false;
         }
 
-        out = event_timer_.ping_list.insert(event_timer_.ping_list.end(), std::make_pair(event_timer_.sec + conf_.ping_interval, ep));
+        out = event_timer_.ping_list.insert(event_timer_.ping_list.end(), std::make_pair(event_timer_.timer + conf_.ping_interval, ep));
         return out != event_timer_.ping_list.end();
     }
 
@@ -2129,9 +2123,7 @@ namespace atbus {
 
         // hash start timer
         {
-            time_t t = get_timer_sec();
-            sha256.update(reinterpret_cast<const unsigned char*>(&t), sizeof(t));
-            t = get_timer_usec();
+            clock_type::rep t = (get_timer() - clock_type::from_time_t(0)).count();
             sha256.update(reinterpret_cast<const unsigned char*>(&t), sizeof(t));
         }
 
@@ -2154,7 +2146,7 @@ namespace atbus {
             state_ = state_t::LOST_PARENT;
 
             // set reconnect to parent into retry interval
-            event_timer_.parent_opr_time_point = get_timer_sec() + conf_.retry_interval;
+            event_timer_.parent_opr_time_point = get_timer() + conf_.retry_interval;
 
             // event
             if (event_msg_.on_endpoint_removed) {
@@ -2291,7 +2283,7 @@ namespace atbus {
         iostream_conf_->send_buffer_static     = conf_.send_buffer_number;
         iostream_conf_->send_buffer_max_size   = conf_.send_buffer_size;
         iostream_conf_->send_buffer_limit_size = conf_.msg_size + ATBUS_MACRO_MAX_FRAME_HEADER + ::atbus::detail::buffer_block::padding_size(sizeof(uv_write_t) + sizeof(uint32_t) + 16);
-        iostream_conf_->confirm_timeout        = conf_.first_idle_timeout;
+        iostream_conf_->confirm_timeout        = static_cast<time_t>(std::chrono::duration_cast<std::chrono::seconds>(conf_.first_idle_timeout).count());
         iostream_conf_->backlog                = conf_.backlog;
 
         return iostream_conf_.get();

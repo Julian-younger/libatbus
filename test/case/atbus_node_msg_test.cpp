@@ -183,7 +183,7 @@ static int node_msg_test_on_pong(const atbus::node &n, const atbus::endpoint *ep
 CASE_TEST(atbus_node_msg, ping_pong) {
     atbus::node::conf_t conf;
     atbus::node::default_conf(&conf);
-    conf.ping_interval = 1;
+    conf.ping_interval = std::chrono::seconds(1);
     uv_loop_t ev_loop;
     uv_loop_init(&ev_loop);
 
@@ -229,42 +229,41 @@ CASE_TEST(atbus_node_msg, ping_pong) {
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node2->listen("ipv4://127.0.0.1:16388"));
 
         atbus::node::start_conf_t start_conf;
-        start_conf.timer_sec = time(NULL);
-        start_conf.timer_usec = 0;
+        start_conf.timer = atbus::node::clock_type::now();
+
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, parent->start(start_conf));
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node1->start(start_conf));
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node2->start(start_conf));
 
         node1->connect("ipv4://127.0.0.1:16388");
 
-        int tick_sec_count = 0;
+        atbus::node::timepoint_t tick_start = start_conf.timer;
         int old_ping_count = recv_msg_history.ping_count;
         int old_pong_count = recv_msg_history.pong_count;
         // 8s timeout
         UNITTEST_WAIT_UNTIL(conf.ev_loop, 
             recv_msg_history.pong_count - old_pong_count >= 40,
                             8000, 8) {
-            start_conf.timer_usec += 80000;
-            if (start_conf.timer_usec >= 1000000) {
-                start_conf.timer_usec -= 1000000;
-                ++ start_conf.timer_sec;
-                ++ tick_sec_count;
-            }
+            start_conf.timer += std::chrono::microseconds(80000);
 
-            node1->proc(start_conf.timer_sec, start_conf.timer_usec);
-            node2->proc(start_conf.timer_sec, start_conf.timer_usec);
-            parent->proc(start_conf.timer_sec, start_conf.timer_usec);
+            node1->proc(start_conf.timer);
+            node2->proc(start_conf.timer);
+            parent->proc(start_conf.timer);
         }
 
         CASE_EXPECT_GE(recv_msg_history.pong_count - old_pong_count, 40);
-        CASE_EXPECT_GE(recv_msg_history.pong_count - old_pong_count, 4 * tick_sec_count - 8);
-        CASE_EXPECT_LE(recv_msg_history.pong_count - old_pong_count, 4 * tick_sec_count + 8);
+        CASE_EXPECT_GE(recv_msg_history.pong_count - old_pong_count, 4 * std::chrono::duration_cast<std::chrono::seconds>(start_conf.timer - tick_start).count() - 8);
+        CASE_EXPECT_LE(recv_msg_history.pong_count - old_pong_count, 4 * std::chrono::duration_cast<std::chrono::seconds>(start_conf.timer - tick_start).count() + 8);
         CASE_EXPECT_GE(recv_msg_history.pong_count - old_pong_count, recv_msg_history.ping_count - old_ping_count);
         CASE_EXPECT_LE(recv_msg_history.pong_count - old_pong_count, recv_msg_history.ping_count - old_ping_count + 8);
 
-        CASE_EXPECT_GT(node2->get_endpoint(node1->get_id())->get_stat_last_pong(), 0);
-        CASE_EXPECT_GT(node1->get_endpoint(node2->get_id())->get_stat_last_pong(), 0);
-        CASE_MSG_INFO()<< "Ping delay: "<< node2->get_endpoint(node1->get_id())->get_stat_ping_delay()<< std::endl;
+        time_t node_1in2_stat_last_pong = node2->get_endpoint(node1->get_id())->get_stat_last_pong().time_since_epoch().count();
+        time_t node_2in1_stat_last_pong = node1->get_endpoint(node2->get_id())->get_stat_last_pong().time_since_epoch().count();
+        CASE_EXPECT_GT(node_1in2_stat_last_pong, atbus::node::clock_type::from_time_t(0).time_since_epoch().count());
+        CASE_EXPECT_GT(node_2in1_stat_last_pong, atbus::node::clock_type::from_time_t(0).time_since_epoch().count());
+        CASE_MSG_INFO()<< "Ping delay: "<< 
+            std::chrono::duration_cast<std::chrono::microseconds>(node2->get_endpoint(node1->get_id())->get_stat_ping_delay()).count()<< 
+            "us"<< std::endl;
     }
 
     unit_test_setup_exit(&ev_loop);
@@ -755,21 +754,21 @@ CASE_TEST(atbus_node_msg, parent_and_child) {
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node_parent->start());
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node_child->start());
 
-        time_t proc_t = time(NULL) + 1;
+        atbus::node::timepoint_t proc_t = atbus::node::clock_type::now() + std::chrono::seconds(1);
 
         UNITTEST_WAIT_UNTIL(conf.ev_loop,
                             node_child->is_endpoint_available(node_parent->get_id()) &&
                                 node_parent->is_endpoint_available(node_child->get_id()),
                             8000, 64) {
-            node_parent->proc(proc_t, 0);
-            node_child->proc(proc_t, 0);
-            ++proc_t;
+            node_parent->proc(proc_t);
+            node_child->proc(proc_t);
+            proc_t += std::chrono::seconds(1);
         }
 
         // 顺便启动父子节点的ping
-        proc_t += conf.ping_interval + 1;
-        node_parent->proc(proc_t, 0);
-        node_child->proc(proc_t, 0);
+        proc_t += conf.ping_interval + std::chrono::seconds(1);
+        node_parent->proc(proc_t);
+        node_child->proc(proc_t);
 
         node_child->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
         node_parent->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
@@ -804,7 +803,10 @@ CASE_TEST(atbus_node_msg, parent_and_child) {
             CASE_EXPECT_NE(0, data_seq);
         }
 
-        CASE_EXPECT_GT(node_child->get_endpoint(node_parent->get_id())->get_stat_last_pong(), 0);
+        time_t stat_last_pong = std::chrono::duration_cast<std::chrono::seconds>(
+                node_child->get_endpoint(node_parent->get_id())->get_stat_last_pong().time_since_epoch()
+            ).count();
+        CASE_EXPECT_GT(stat_last_pong, 0);
 
         do {
             atbus::endpoint* child_ep = node_parent->get_endpoint(node_child->get_id());
@@ -812,7 +814,10 @@ CASE_TEST(atbus_node_msg, parent_and_child) {
             if (NULL == child_ep) {
                 break;
             }
-            CASE_EXPECT_GT(child_ep->get_stat_last_pong(), 0);
+            stat_last_pong = std::chrono::duration_cast<std::chrono::seconds>(
+                child_ep->get_stat_last_pong().time_since_epoch()
+            ).count();
+            CASE_EXPECT_GT(stat_last_pong, 0);
 
             CASE_MSG_INFO()<< "Parent push start times: "<< child_ep->get_stat_push_start_times()<< std::endl;
             CASE_MSG_INFO()<< "Parent push start size: "<< child_ep->get_stat_push_start_size()<< std::endl;
@@ -821,8 +826,8 @@ CASE_TEST(atbus_node_msg, parent_and_child) {
             CASE_MSG_INFO()<< "Parent push failed times: "<< child_ep->get_stat_push_failed_times()<< std::endl;
             CASE_MSG_INFO()<< "Parent push failed size: "<< child_ep->get_stat_push_failed_size()<< std::endl;
             CASE_MSG_INFO()<< "Parent pull size: "<< child_ep->get_stat_pull_size()<< std::endl;
-            CASE_MSG_INFO()<< "Parent created usec: "<< child_ep->get_stat_created_time_usec()<< std::endl;
-            CASE_MSG_INFO()<< "Parent created sec: "<< child_ep->get_stat_created_time_sec()<< std::endl;
+            CASE_MSG_INFO()<< "Parent created sec: "<< 
+                std::chrono::duration_cast<std::chrono::seconds>(child_ep->get_stat_created_time().time_since_epoch()).count()<< std::endl;
         } while(false);
     }
 

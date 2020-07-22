@@ -11,14 +11,27 @@ option cc_enable_arenas = true;
 enum ATBUS_PROTOCOL_CONST {
     option allow_alias             = true;
     ATBUS_PROTOCOL_CONST_UNKNOWN   = 0;
-    ATBUS_PROTOCOL_VERSION         = 2;
-    ATBUS_PROTOCOL_MINIMAL_VERSION = 2; // minimal protocol version supported
+    ATBUS_PROTOCOL_VERSION         = 3;
+    ATBUS_PROTOCOL_MINIMAL_VERSION = 3; // minimal protocol version supported
 }
 
 enum ATBUS_FORWARD_DATA_FLAG_TYPE {
     FORWARD_DATA_FLAG_NONE = 0;
     // all flags must be power of 2
     FORWARD_DATA_FLAG_REQUIRE_RSP = 1;
+}
+
+enum ATBUS_ENDPOINT_FLAG_TYPE {
+    ATBUS_ENDPOINT_FLAG_RESETTING         = 0;   /** if endpoint is reseting **/
+    ATBUS_ENDPOINT_FLAG_CONNECTION_SORTED = 1;   /** if all connection in endpoints are sorted **/
+    ATBUS_ENDPOINT_FLAG_DESTRUCTING       = 2;   /** if endpoint is destructing **/
+    ATBUS_ENDPOINT_FLAG_HAS_LISTEN_PORC   = 3;   /** if endpoint has connection that need to call proc interval **/
+    ATBUS_ENDPOINT_FLAG_HAS_LISTEN_FD     = 4;   /** if endpoint has connection with fd backend **/
+
+    ATBUS_ENDPOINT_FLAG_MUTABLE_FLAGS     = 20;  /** endpoint mutable flags start here **/
+    ATBUS_ENDPOINT_FLAG_HAS_PING_TIMER    = 21;  /** if endpoint has setup a ping timer **/
+
+    // flag index can not be greater than 31
 }
 
 message custom_command_argv { bytes arg = 1; }
@@ -76,12 +89,29 @@ message register_data {
 
 message connection_data { channel_data address = 1; }
 
+message external_resource {
+    string namespace_name = 1;
+    string api_version    = 2;
+    string kind           = 3;
+
+    string service_name    = 21;
+    string service_version = 22;
+    string service_subset  = 23;
+
+    map<string, string> labels = 101;
+}
+
 message msg_head {
-    int32  version    = 1;
-    int32  type       = 2;
-    sint32 ret        = 3;
-    uint64 sequence   = 4;
-    uint64 src_bus_id = 5;
+    int32  version     = 1;
+    int32  type        = 2;
+    sint32 ret         = 3;
+    uint64 sequence    = 4;
+    uint64 src_bus_id  = 5;
+    uint64 dst_bus_id  = 6; // version: 3, all protocol support proxy
+    uint64 retry_times = 7; // version: 3, auto retry
+
+    // 1024-2047 for external system usage, atbus do not use these fields directly
+    external_resource ingress = 1024; // for external load balance system, such as kubernetes
 }
 
 message msg {
@@ -99,4 +129,8 @@ message msg {
         ping_data           node_ping_req      = 21;
         ping_data           node_pong_rsp      = 22;
     }
+}
+
+service atbus_service {
+    rpc send_msg(stream msg) returns (stream msg) {}
 }

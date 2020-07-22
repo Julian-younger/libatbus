@@ -102,6 +102,10 @@ namespace atbus {
             return EN_ATBUS_ERR_ATNODE_INVALID_MSG;
         }
 
+        // TODO 依据 dst_bus_id 的代理转发
+        //   TODO 检查版本号
+        //   TODO 转发失败的回包
+
         n.stat_add_dispatch_times();
         return fns[m.msg_body_case()](n, conn, ATBUS_MACRO_MOVE(m), status, errcode);
     }
@@ -151,7 +155,11 @@ namespace atbus {
         head->set_sequence(msg_seq);
         head->set_src_bus_id(self_id);
 
-        body->set_time_point(n.get_timer_sec() * 1000 + (n.get_timer_usec() / 1000) % 1000);
+        body->set_time_point(
+            static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                n.get_timer() - node::clock_type::from_time_t(0)).count()
+            )
+        );
 
         return send_msg(n, conn, *m);
     }
@@ -456,7 +464,8 @@ namespace atbus {
             fwd_content_ptr = reinterpret_cast<const void*>(fwd_data->content().data());
             fwd_content_size = fwd_data->content().size();
         }
-        if (fwd_data->to() == n.get_id()) {
+        // When using external load balance system, we set fwd_data.to to 0 and accept all income packages
+        if (fwd_data->to() == n.get_id() || 0 == fwd_data->to()) {
             ATBUS_FUNC_NODE_DEBUG(n, (NULL == conn ? NULL : conn->get_binding()), conn, &m, "node recv data length = %lld",
                                 static_cast<unsigned long long>(fwd_content_size));
             n.on_recv_data(NULL == conn ? NULL : conn->get_binding(), conn, m, fwd_content_ptr, fwd_content_size);
@@ -484,7 +493,7 @@ namespace atbus {
         // 子节点转发成功
         if (res >= 0 && n.is_child_node(fwd_data->to())) {
             // 如果来源和目标消息都来自于子节点，则通知建立直连
-            if (NULL != to_ep && to_ep->get_flag(endpoint::flag_t::HAS_LISTEN_FD) && n.is_child_node(direct_from_bus_id) &&
+            if (NULL != to_ep && to_ep->get_flag(::atbus::protocol::ATBUS_ENDPOINT_FLAG_HAS_LISTEN_FD) && n.is_child_node(direct_from_bus_id) &&
                 n.is_child_node(to_ep->get_id())) {
                 res = send_node_connect_sync(n, direct_from_bus_id, *to_ep);
             }
@@ -548,7 +557,8 @@ namespace atbus {
         // all transfer message must be send by a verified connect, there is no need to check access token again
 
         // dispatch message
-        if (fwd_data->to() == n.get_id()) {
+        // When using external load balance system, we set fwd_data.to to 0 and accept all income packages
+        if (fwd_data->to() == n.get_id() || 0 == fwd_data->to()) {
             if (m.head().ret() < 0) {
                 ATBUS_FUNC_NODE_ERROR(n, NULL == conn ? NULL : conn->get_binding(), conn, m.head().ret(), 0);
             }
@@ -800,7 +810,7 @@ namespace atbus {
             }
 
             // 创建新端点时需要判定全局路由表权限
-            std::bitset<endpoint::flag_t::MAX> reg_flags(reg_data->flags());
+            std::bitset<::atbus::protocol::ATBUS_ENDPOINT_FLAG_TYPE_ARRAYSIZE> reg_flags(reg_data->flags());
             std::vector<endpoint_subnet_conf> ep_subnets;
             ep_subnets.reserve(reg_data->subnets_size() + 1);
             {
@@ -1150,8 +1160,9 @@ namespace atbus {
             if (NULL != ep && m.head().sequence() == ep->get_stat_ping()) {
                 ep->set_stat_ping(0);
 
-                time_t time_point = n.get_timer_sec() * 1000 + (n.get_timer_usec() / 1000) % 1000;
-                ep->set_stat_ping_delay(time_point - msg_body.time_point(), n.get_timer_sec());
+                node::timepoint_t ping_time = node::clock_type::from_time_t(msg_body.time_point() / 1000) + 
+                    std::chrono::milliseconds(msg_body.time_point() % 1000);
+                ep->set_stat_ping_delay(n.get_timer() - ping_time, n.get_timer());
             }
         }
 

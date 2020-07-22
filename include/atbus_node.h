@@ -51,10 +51,25 @@ namespace atbus {
 
     class node UTIL_CONFIG_FINAL : public util::design_pattern::noncopyable {
     public:
-        typedef std::shared_ptr<node> ptr_t;
-        typedef ::atbus::protocol::msg &msg_builder_ref_t;
+        typedef connection::clock_type clock_type;
+#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
+        using clock_type = connection::clock_type;
+        using timepoint_t = connection::timepoint_t;
+        using duration_t = connection::duration_t;
 
+        using ptr_t = std::shared_ptr<node>;
+        using msg_builder_ref_t = ::atbus::protocol::msg &;
+        using bus_id_t = ATBUS_MACRO_BUSID_TYPE;
+#else
+        typedef connection::clock_type clock_type;
+        typedef connection::timepoint_t timepoint_t;
+        typedef connection::duration_t duration_t;
+
+        typedef std::shared_ptr<node> ptr_t;
+        typedef ::atbus::protocol::msg & msg_builder_ref_t;
         typedef ATBUS_MACRO_BUSID_TYPE bus_id_t;
+#endif
+        
         struct conf_flag_t {
             enum type {
                 EN_CONF_MAX = 0,
@@ -113,18 +128,26 @@ namespace atbus {
 
             // ===== 连接配置 =====
             int backlog;
-            time_t first_idle_timeout;      /** 第一个包允许的空闲时间，秒 **/
-            time_t ping_interval;           /** ping包间隔，秒 **/
-            time_t retry_interval;          /** 重试包间隔，秒 **/
+            duration_t first_idle_timeout;      /** 第一个包允许的空闲时间，秒 **/
+            duration_t ping_interval;           /** ping包间隔，秒 **/
+            duration_t retry_interval;          /** 重试包间隔，秒 **/
             size_t fault_tolerant;          /** 容错次数，次 **/
             size_t access_token_max_number; /** 最大access token数量，请不要设置的太大，验证次数最大可能是N^2 **/
             std::vector<std::vector<unsigned char> > access_tokens; /** access token列表 **/
 
-            // ===== 缓冲区配置 =====
-            size_t msg_size;           /** max message size **/
-            size_t recv_buffer_size;   /** 接收缓冲区，和数据包大小有关 **/
-            size_t send_buffer_size;   /** 发送缓冲区限制 **/
-            size_t send_buffer_number; /** 发送缓冲区静态Buffer数量限制，0则为动态缓冲区 **/
+            // ===== 缓冲区和同步配置 =====
+            size_t msg_size;                   /** max message size **/
+            size_t recv_buffer_size;           /** 接收缓冲区，和数据包大小有关 **/
+            size_t send_buffer_size;           /** 发送缓冲区限制 **/
+            size_t send_buffer_number;         /** 发送缓冲区静态Buffer数量限制，0则为动态缓冲区 **/
+
+            /** protocol version: 3 **/
+            size_t endpoint_buffer_size;   /** endpoint 内的自动重试缓冲区长度限制 **/
+            size_t endpoint_buffer_number; /** endpoint 内的自动重试缓冲区数量限制 **/
+            size_t endpoint_retry_times;   /** endpoint 内的自动重试次数限制 **/
+            /** endpoint 内的自动重试缓冲区超时时间 **/
+            duration_t endpoint_buffer_timeout;
+            duration_t endpoint_buffer_retry_interval;
 
             ATBUS_MACRO_API conf_t();
             ATBUS_MACRO_API conf_t(const conf_t& other);
@@ -133,8 +156,7 @@ namespace atbus {
         };
 
         struct start_conf_t {
-            time_t timer_sec;
-            time_t timer_usec;
+            timepoint_t timer;
         };
 
         typedef std::map<endpoint_subnet_range, endpoint::ptr_t> endpoint_collection_t;
@@ -251,6 +273,14 @@ namespace atbus {
          * @return 本帧处理的消息数
          */
         ATBUS_MACRO_API int proc(time_t sec, time_t usec);
+
+        /**
+         * @brief 执行一帧
+         * @param sec 当前时间-秒
+         * @param sec 当前时间-微秒
+         * @return 本帧处理的消息数
+         */
+        ATBUS_MACRO_API int proc(const timepoint_t& timer);
 
         /**
          * @brief poll libuv
@@ -519,9 +549,7 @@ namespace atbus {
 
         ATBUS_MACRO_API size_t get_connection_timer_size() const;
 
-        ATBUS_MACRO_API time_t get_timer_sec() const;
-
-        ATBUS_MACRO_API time_t get_timer_usec() const;
+        ATBUS_MACRO_API timepoint_t get_timer() const;
 
         ATBUS_MACRO_API void on_recv(connection *conn, ::atbus::protocol::msg ATBUS_MACRO_RVALUE_REFERENCES m, int status, int errcode);
 
@@ -696,11 +724,9 @@ namespace atbus {
 
         // ============ 定时器 ============
         struct evt_timer_t {
-            time_t sec;
-            time_t usec;
+            timepoint_t timer;
 
-            time_t node_sync_push;                                   // 节点变更推送
-            time_t parent_opr_time_point;                            // 父节点操作时间（断线重连或Ping）
+            timepoint_t parent_opr_time_point;                       // 父节点操作时间（断线重连或Ping）
             timer_desc_ls<std::weak_ptr<endpoint> >::type ping_list; // 定时ping
             timer_desc_ls<connection::ptr_t>::type connecting_list;  // 未完成连接（正在网络连接或握手）
             std::list<endpoint::ptr_t> pending_endpoint_gc_list;     // 待检测GC的endpoint列表

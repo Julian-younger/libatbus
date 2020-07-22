@@ -321,13 +321,13 @@ CASE_TEST(atbus_node_reg, timeout) {
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node1->start());
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node2->start());
 
-        time_t proc_t = time(NULL);
+        atbus::node::timepoint_t proc_t = atbus::node::clock_type::now();
         node1->poll();
         node2->poll();
-        node1->proc(proc_t + 1, 0);
-        node1->proc(proc_t + 1, 1);
-        node2->proc(proc_t + 1, 0);
-        node2->proc(proc_t + 1, 1);
+        node1->proc(proc_t + std::chrono::milliseconds(1000));
+        node1->proc(proc_t + std::chrono::milliseconds(1001));
+        node2->proc(proc_t + std::chrono::milliseconds(1000));
+        node2->proc(proc_t + std::chrono::milliseconds(1001));
 
 
         // 连接兄弟节点回调测试
@@ -355,9 +355,9 @@ CASE_TEST(atbus_node_reg, timeout) {
             return;
         }
 
-        proc_t = time(NULL) + 2;
-        node1->proc(proc_t + conf.first_idle_timeout + 2, 0);
-        node2->proc(proc_t + conf.first_idle_timeout + 2, 0);
+        proc_t = atbus::node::clock_type::now() + std::chrono::seconds(2);
+        node1->proc(proc_t + conf.first_idle_timeout + std::chrono::seconds(2));
+        node2->proc(proc_t + conf.first_idle_timeout + std::chrono::seconds(2));
 
         UNITTEST_WAIT_UNTIL(conf.ev_loop, recv_msg_history.invalid_connection_count >= check_invalid_connection_count + 1, 8000, 0) {}
         CASE_EXPECT_LE(check_invalid_connection_count + 1, recv_msg_history.invalid_connection_count);
@@ -817,28 +817,23 @@ CASE_TEST(atbus_node_reg, reg_pc_success) {
         node_child->set_on_add_endpoint_handle(node_reg_test_add_endpoint_fn);
         node_child->set_on_remove_endpoint_handle(node_reg_test_remove_endpoint_fn);
 
-        time_t proc_t_start_sec = time(NULL);
-        time_t proc_t_sec = proc_t_start_sec;
-        time_t proc_t_usec = 0;
+        atbus::node::timepoint_t proc_t_start = atbus::node::clock_type::now();
+        atbus::node::timepoint_t proc_t = proc_t_start;
         node_parent->poll();
         node_child->poll();
 
-        ++ proc_t_sec;
-        node_parent->proc(proc_t_sec, proc_t_usec);
-        node_child->proc(proc_t_sec, proc_t_usec);
+        proc_t += std::chrono::seconds(1);
+        node_parent->proc(proc_t);
+        node_child->proc(proc_t);
 
 
         // 注册成功自动会有可用的端点
         UNITTEST_WAIT_UNTIL(
             conf.ev_loop,
             node_child->is_endpoint_available(node_parent->get_id()) && node_parent->is_endpoint_available(node_child->get_id()), 8000, 8) {
-            proc_t_usec += 8000;
-            if (proc_t_usec >= 1000000) {
-                proc_t_usec = 0;
-                ++ proc_t_sec;
-            }
-            node_parent->proc(proc_t_sec, proc_t_usec);
-            node_child->proc(proc_t_sec, proc_t_usec);
+            proc_t += std::chrono::milliseconds(8);
+            node_parent->proc(proc_t);
+            node_child->proc(proc_t);
         }
 
         // in windows CI, connection will be closed sometimes, it will lead to add one endpoint more than one times
@@ -854,9 +849,9 @@ CASE_TEST(atbus_node_reg, reg_pc_success) {
             CASE_EXPECT_NE(NULL, test_ep);
             CASE_EXPECT_NE(NULL, test_conn);
             if (NULL != test_ep) {
-                CASE_EXPECT_GE(test_ep->get_stat_created_time_sec(), proc_t_start_sec);
-                CASE_EXPECT_GE(test_ep->get_stat_created_time_usec(), 0);
-                CASE_EXPECT_LE(test_ep->get_stat_created_time_usec(), 1000000);
+                time_t create_time_count = test_ep->get_stat_created_time().time_since_epoch().count();
+                time_t proc_time_count = proc_t_start.time_since_epoch().count();
+                CASE_EXPECT_GE(create_time_count, proc_time_count);
 
                 CASE_EXPECT_FALSE(test_ep->get_hash_code().empty());
                 CASE_EXPECT_EQ(node_child->get_self_endpoint()->get_hash_code(), test_ep->get_hash_code());
@@ -872,9 +867,9 @@ CASE_TEST(atbus_node_reg, reg_pc_success) {
             CASE_EXPECT_NE(NULL, test_ep);
             CASE_EXPECT_NE(NULL, test_conn);
             if (NULL != test_ep) {
-                CASE_EXPECT_GE(test_ep->get_stat_created_time_sec(), proc_t_start_sec);
-                CASE_EXPECT_GE(test_ep->get_stat_created_time_usec(), 0);
-                CASE_EXPECT_LE(test_ep->get_stat_created_time_usec(), 1000000);
+                time_t create_time_count = test_ep->get_stat_created_time().time_since_epoch().count();
+                time_t proc_time_count = proc_t_start.time_since_epoch().count();
+                CASE_EXPECT_GE(create_time_count, proc_time_count);
                 CASE_EXPECT_FALSE(test_ep->get_hash_code().empty());
                 CASE_EXPECT_EQ(node_parent->get_self_endpoint()->get_hash_code(), test_ep->get_hash_code());
             }
@@ -1258,15 +1253,15 @@ CASE_TEST(atbus_node_reg, conflict) {
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node_child->start());
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node_child_fail->start());
 
-        time_t proc_t = time(NULL) + 1;
+        atbus::node::timepoint_t proc_t = atbus::node::clock_type::now() + std::chrono::seconds(1);
         // 必然有一个失败的
         UNITTEST_WAIT_UNTIL(conf.ev_loop,
                             atbus::node::state_t::CREATED != node_child->get_state() &&
                                 atbus::node::state_t::CREATED != node_child_fail->get_state(),
                             8000, 64) {
-            node_parent->proc(proc_t, 0);
-            node_child->proc(proc_t, 0);
-            node_child_fail->proc(proc_t, 0);
+            node_parent->proc(proc_t);
+            node_child->proc(proc_t);
+            node_child_fail->proc(proc_t);
             proc_t += conf.retry_interval;
         }
 
@@ -1321,12 +1316,12 @@ CASE_TEST(atbus_node_reg, reconnect_parent_failed) {
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node_parent->start());
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node_child->start());
 
-        time_t proc_t = time(NULL) + 1;
+        atbus::node::timepoint_t proc_t = atbus::node::clock_type::now() + std::chrono::seconds(1);
         // 先等连接成功
         UNITTEST_WAIT_UNTIL(conf.ev_loop, atbus::node::state_t::RUNNING == node_child->get_state(), 8000, 64) {
-            node_parent->proc(proc_t, 0);
-            node_child->proc(proc_t, 0);
-            ++proc_t;
+            node_parent->proc(proc_t);
+            node_child->proc(proc_t);
+            proc_t += std::chrono::seconds(1);
         }
 
         // 关闭父节点
@@ -1336,9 +1331,9 @@ CASE_TEST(atbus_node_reg, reconnect_parent_failed) {
         // 连接过程中的转态变化
         size_t retry_times = 0;
         UNITTEST_WAIT_IF(conf.ev_loop, atbus::node::state_t::RUNNING == node_child->get_state() || retry_times < 16, 8000, 64) {
-            proc_t += conf.retry_interval + 1;
+            proc_t += conf.retry_interval + std::chrono::seconds(1);
 
-            node_child->proc(proc_t, 0);
+            node_child->proc(proc_t);
 
             if (atbus::node::state_t::RUNNING != node_child->get_state()) {
                 ++retry_times;
@@ -1367,8 +1362,8 @@ CASE_TEST(atbus_node_reg, reconnect_parent_failed) {
             conf.ev_loop,
             atbus::node::state_t::RUNNING != node_child->get_state() || NULL == node_parent->get_endpoint(node_child->get_id()), 8000, 64) {
             proc_t += conf.retry_interval;
-            node_parent->proc(proc_t, 0);
-            node_child->proc(proc_t, 0);
+            node_parent->proc(proc_t);
+            node_child->proc(proc_t);
         }
 
         {

@@ -24,6 +24,12 @@
 #include "std/explicit_declare.h"
 #include "std/smart_ptr.h"
 
+#include <chrono>
+
+#ifdef __cpp_impl_three_way_comparison
+#include <compare>
+#endif
+
 #include "detail/libatbus_channel_export.h"
 #include "detail/libatbus_config.h"
 #include "detail/libatbus_error.h"
@@ -43,13 +49,36 @@ namespace atbus {
 
     template <typename TObj>
     struct timer_desc_ls {
-        typedef std::pair<time_t, TObj> pair_type;
+#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
+        using clock_type = std::chrono::system_clock;
+        using timepoint_t = clock_type::time_point;
+        using duration_t = clock_type::duration;
+
+        using pair_type = std::pair<timepoint_t, TObj>;
+        using type = std::list<pair_type>;
+#else
+        typedef std::chrono::system_clock clock_type;
+        typedef clock_type::time_point timepoint_t;
+        typedef clock_type::duration duration_t;
+
+        typedef std::pair<timepoint_t, TObj> pair_type;
         typedef std::list<pair_type> type;
+#endif
     };
 
     class connection UTIL_CONFIG_FINAL : public util::design_pattern::noncopyable {
     public:
+#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
+        using clock_type = std::chrono::system_clock;
+        using timepoint_t = clock_type::time_point;
+        using duration_t = clock_type::duration;
+        using ptr_t = std::shared_ptr<connection>;
+#else
+        typedef std::chrono::system_clock clock_type;
+        typedef clock_type::time_point timepoint_t;
+        typedef clock_type::duration duration_t;
         typedef std::shared_ptr<connection> ptr_t;
+#endif
 
         /** 并没有非常复杂的状态切换，所以没有引入状态机 **/
         struct state_t {
@@ -104,11 +133,10 @@ namespace atbus {
 
         /**
          * @brief 执行一帧
-         * @param sec 当前时间-秒
-         * @param usec 当前时间-微秒
+         * @param timer 当前定时器时间
          * @return 本帧处理的消息数
          */
-        ATBUS_MACRO_API int proc(node &n, time_t sec, time_t usec);
+        ATBUS_MACRO_API int proc(node &n, const timepoint_t& timer);
 
         /**
          * @brief 监听数据接收地址
@@ -205,14 +233,14 @@ namespace atbus {
                                         void *buffer, size_t s);
 
 #ifdef ATBUS_CHANNEL_SHM
-        static ATBUS_MACRO_API int shm_proc_fn(node &n, connection &conn, time_t sec, time_t usec);
+        static ATBUS_MACRO_API int shm_proc_fn(node &n, connection &conn, const timepoint_t& timer);
 
         static ATBUS_MACRO_API int shm_free_fn(node &n, connection &conn);
 
         static ATBUS_MACRO_API int shm_push_fn(connection &conn, const void *buffer, size_t s);
 #endif
 
-        static ATBUS_MACRO_API int mem_proc_fn(node &n, connection &conn, time_t sec, time_t usec);
+        static ATBUS_MACRO_API int mem_proc_fn(node &n, connection &conn, const timepoint_t& timer);
 
         static ATBUS_MACRO_API int mem_free_fn(node &n, connection &conn);
 
@@ -261,7 +289,7 @@ namespace atbus {
 #endif
                 conn_data_ios ios_fd;
             } shared_t;
-            typedef int (*proc_fn_t)(node &n, connection &conn, time_t sec, time_t usec);
+            typedef int (*proc_fn_t)(node &n, connection &conn, const timepoint_t& timer);
             typedef int (*free_fn_t)(node &n, connection &conn);
             typedef int (*push_fn_t)(connection &conn, const void *buffer, size_t s);
 
