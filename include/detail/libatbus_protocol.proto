@@ -30,6 +30,7 @@ enum ATBUS_ENDPOINT_FLAG_TYPE {
 
     ATBUS_ENDPOINT_FLAG_MUTABLE_FLAGS     = 20;  /** endpoint mutable flags start here **/
     ATBUS_ENDPOINT_FLAG_HAS_PING_TIMER    = 21;  /** if endpoint has setup a ping timer **/
+    ATBUS_ENDPOINT_FLAG_CUSTOM_LIFETIME   = 22;  /** if endpoint has setup a ping timer **/
 
     // flag index can not be greater than 31
 }

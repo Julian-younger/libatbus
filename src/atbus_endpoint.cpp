@@ -316,31 +316,43 @@ namespace atbus {
             return true;
         }
 
+        bool ret = false;
         if (conn == ctrl_conn_.get()) {
-            // 控制节点离线则直接下线
-            reset();
-            return true;
+            ctrl_conn_.reset();
+            ret = true;
         }
 
+        // TODO 检查是否是代理连接,代理连接可能是纯连接，也可能是代理节点
+
         // 每个节点的连接数不会很多，并且连接断开时是个低频操作
-        // 所以O(log(n))的复杂度并没有关系
+        // 所以O(n)的复杂度并没有关系
         for (std::list<connection::ptr_t>::iterator iter = data_conn_.begin(); iter != data_conn_.end(); ++iter) {
             if ((*iter).get() == conn) {
                 conn->binding_ = NULL;
                 data_conn_.erase(iter);
 
-                // 数据节点全部离线也直接下线
-                // 内存和共享内存通道不会被动下线
-                // 如果任意tcp通道被动下线或者存在内存或共享内存通道则无需下线
-                // 因为通常来说内存或共享内存通道就是最快的通道
-                if (data_conn_.empty()) {
-                    reset();
-                }
-                return true;
+                
+                ret = true;
+                break;
             }
         }
 
-        return false;
+        /**
+         * 控制节点离线则直接下线
+         * 数据节点全部离线也直接下线
+         *   内存和共享内存通道不会被动下线
+         *   如果任意tcp通道被动下线或者存在内存或共享内存通道则无需下线
+         *   因为通常来说内存或共享内存通道就是最快的通道
+         * TODO 存在代理连接则不需要下线
+         * 手动维护的节点不需要自动下线
+        **/
+        if (!get_flag(atbus::protocol::ATBUS_ENDPOINT_FLAG_CUSTOM_LIFETIME)) {
+            if (!ctrl_conn_ || data_conn_.empty()) {
+                reset();
+            }
+        }
+
+        return ret;
     }
 
     ATBUS_MACRO_API bool endpoint::is_available() const {

@@ -223,6 +223,8 @@ namespace atbus {
         body->set_pid(n.get_pid());
         body->set_hostname(n.get_hostname());
 
+        // TODO 增加本地监听地址
+
         const endpoint* self_ep = n.get_self_endpoint();
         if (NULL == self_ep) {
             ATBUS_FUNC_NODE_ERROR(n, self_ep, NULL, EN_ATBUS_ERR_NOT_INITED, EN_ATBUS_ERR_NOT_INITED);
@@ -351,6 +353,8 @@ namespace atbus {
         bool is_same_host                          = (NULL != from_ep && from_ep->get_hostname() == dst_ep.get_hostname());
         const std::string *select_address          = NULL;
         for (std::list<std::string>::const_iterator iter = listen_addrs.begin(); iter != listen_addrs.end(); ++iter) {
+            // TODO 如果有代理地址则使用代理地址
+            
             // 通知连接控制通道，控制通道不能是（共享）内存通道
             if (0 == UTIL_STRFUNC_STRNCASE_CMP("mem:", iter->c_str(), 4) || 0 == UTIL_STRFUNC_STRNCASE_CMP("shm:", iter->c_str(), 4)) {
                 continue;
@@ -770,6 +774,8 @@ namespace atbus {
         int32_t rsp_code = EN_ATBUS_ERR_SUCCESS;
 
         do {
+            // TODO 检查对端监听地址和实际的地址，判定是否是代理连接。如果是代理节点则connection要加入代理连接列表
+
             // 如果连接已经设定了端点，不需要再绑定到endpoint
             if (conn->is_connected()) {
                 ep = conn->get_binding();

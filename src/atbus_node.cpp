@@ -219,6 +219,7 @@ namespace atbus {
         if (!self_) {
             return EN_ATBUS_ERR_MALLOC;
         }
+        self_->set_flag(atbus::protocol::ATBUS_ENDPOINT_FLAG_CUSTOM_LIFETIME, true);
         self_->clear_ping_timer();
         // 复制配置
 

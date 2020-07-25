@@ -51,7 +51,6 @@ namespace atbus {
 
     class node UTIL_CONFIG_FINAL : public util::design_pattern::noncopyable {
     public:
-        typedef connection::clock_type clock_type;
 #if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
         using clock_type = connection::clock_type;
         using timepoint_t = connection::timepoint_t;
@@ -729,6 +728,8 @@ namespace atbus {
             timepoint_t parent_opr_time_point;                       // 父节点操作时间（断线重连或Ping）
             timer_desc_ls<std::weak_ptr<endpoint> >::type ping_list; // 定时ping
             timer_desc_ls<connection::ptr_t>::type connecting_list;  // 未完成连接（正在网络连接或握手）
+
+            // TODO 改为jiffies_timer定时器和action（销毁、重连、Ping）
             std::list<endpoint::ptr_t> pending_endpoint_gc_list;     // 待检测GC的endpoint列表
             std::list<connection::ptr_t> pending_connection_gc_list; // 待检测GC的connection列表
         };

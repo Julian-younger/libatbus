@@ -100,6 +100,7 @@ namespace atbus {
                 RESETTING,         /** 正在执行重置（防止递归死循环） **/
                 DESTRUCTING,       /** 正在执行析构（屏蔽某些接口） **/
                 LISTEN_FD,         /** 是否是用于listen的连接 **/
+                PROXY,             /** 是否是代理连接 **/
                 MAX
             };
         };
