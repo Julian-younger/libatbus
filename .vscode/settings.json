@@ -121,7 +121,8 @@
     "xtree": "cpp",
     "compare": "cpp",
     "variant": "cpp",
-    "format": "cpp"
+    "format": "cpp",
+    "bit": "cpp"
   },
   "C_Cpp.default.configurationProvider": "vector-of-bool.cmake-tools"
 }

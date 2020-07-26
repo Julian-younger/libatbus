@@ -223,7 +223,8 @@ namespace atbus {
         body->set_pid(n.get_pid());
         body->set_hostname(n.get_hostname());
 
-        // TODO 增加本地监听地址
+        // 增加本地监听地址
+        body->set_local_address(conn.get_address().address);
 
         const endpoint* self_ep = n.get_self_endpoint();
         if (NULL == self_ep) {
@@ -245,6 +246,12 @@ namespace atbus {
         body->set_flags(self_ep->get_flags());
 
         body->set_hash_code(n.get_hash_code());
+        const std::vector<std::string>* gateways = n.get_gateways();
+        if (NULL != gateways) {
+            for (size_t i = 0; i < gateways->size(); ++ i) {
+                body->add_gateways((*gateways)[i]);
+            }
+        }
 
         return send_msg(n, conn, *m);
     }
@@ -863,6 +870,7 @@ namespace atbus {
             }
             ep = new_ep.get();
             ep->update_hash_code(reg_data->hash_code());
+            ep->set_gateways(reg_data->gateways());
 
             // 如果是正在连接父节点，要检查一下父节点覆盖的subnets是不是完全覆盖自己
             if (conn->get_address().address == n.get_conf().parent_address) {
@@ -893,6 +901,8 @@ namespace atbus {
                 rsp_code = res;
                 break;
             }
+
+            // TODO 如果有gatewat或者本connection是gateway连接，不需要反向建立连接
 
             ATBUS_FUNC_NODE_DEBUG(n, ep, conn, &m, "node add a new endpoint, res: %d", res);
             // 新的endpoint要建立所有连接

@@ -166,6 +166,19 @@ namespace atbus {
         ATBUS_MACRO_API const std::string &get_hash_code() const;
         ATBUS_MACRO_API void update_hash_code(const std::string &);
 
+        ATBUS_MACRO_API const std::vector<std::string>& get_gateways() const;
+
+        template<class TContainer>
+        ATBUS_MACRO_API_HEAD_ONLY void set_gateways(const TContainer& src) { 
+            gateways_.clear();
+            if (src.size() > 0) {
+                gateways_.reserve(static_cast<size_t>(src.size()));
+                gateways_.assign(src.begin(), src.end());
+            }
+        }
+
+        ATBUS_MACRO_API std::string select_gateway() const;
+
         ATBUS_MACRO_API bool is_child_node(bus_id_t id) const;
 
         static ATBUS_MACRO_API bus_id_t get_children_min_id(bus_id_t children_prefix, uint32_t mask);
@@ -265,6 +278,7 @@ namespace atbus {
         bus_id_t id_;
         std::string hash_code_;
         std::vector<endpoint_subnet_range> subnets_;
+        std::vector<std::string> gateways_;
         std::bitset<::atbus::protocol::ATBUS_ENDPOINT_FLAG_TYPE_ARRAYSIZE> flags_;
         std::string hostname_;
         int32_t pid_;

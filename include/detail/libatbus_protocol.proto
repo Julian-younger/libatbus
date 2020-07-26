@@ -22,15 +22,15 @@ enum ATBUS_FORWARD_DATA_FLAG_TYPE {
 }
 
 enum ATBUS_ENDPOINT_FLAG_TYPE {
-    ATBUS_ENDPOINT_FLAG_RESETTING         = 0;   /** if endpoint is reseting **/
-    ATBUS_ENDPOINT_FLAG_CONNECTION_SORTED = 1;   /** if all connection in endpoints are sorted **/
-    ATBUS_ENDPOINT_FLAG_DESTRUCTING       = 2;   /** if endpoint is destructing **/
-    ATBUS_ENDPOINT_FLAG_HAS_LISTEN_PORC   = 3;   /** if endpoint has connection that need to call proc interval **/
-    ATBUS_ENDPOINT_FLAG_HAS_LISTEN_FD     = 4;   /** if endpoint has connection with fd backend **/
+    ATBUS_ENDPOINT_FLAG_RESETTING         = 0; /** if endpoint is reseting **/
+    ATBUS_ENDPOINT_FLAG_CONNECTION_SORTED = 1; /** if all connection in endpoints are sorted **/
+    ATBUS_ENDPOINT_FLAG_DESTRUCTING       = 2; /** if endpoint is destructing **/
+    ATBUS_ENDPOINT_FLAG_HAS_LISTEN_PORC   = 3; /** if endpoint has connection that need to call proc interval **/
+    ATBUS_ENDPOINT_FLAG_HAS_LISTEN_FD     = 4; /** if endpoint has connection with fd backend **/
 
-    ATBUS_ENDPOINT_FLAG_MUTABLE_FLAGS     = 20;  /** endpoint mutable flags start here **/
-    ATBUS_ENDPOINT_FLAG_HAS_PING_TIMER    = 21;  /** if endpoint has setup a ping timer **/
-    ATBUS_ENDPOINT_FLAG_CUSTOM_LIFETIME   = 22;  /** if endpoint has setup a ping timer **/
+    ATBUS_ENDPOINT_FLAG_MUTABLE_FLAGS   = 20; /** endpoint mutable flags start here **/
+    ATBUS_ENDPOINT_FLAG_HAS_PING_TIMER  = 21; /** if endpoint has setup a ping timer **/
+    ATBUS_ENDPOINT_FLAG_CUSTOM_LIFETIME = 22; /** if endpoint has setup a ping timer **/
 
     // flag index can not be greater than 31
 }
@@ -38,14 +38,14 @@ enum ATBUS_ENDPOINT_FLAG_TYPE {
 message custom_command_argv { bytes arg = 1; }
 
 message custom_command_data {
-    uint64   from                         = 1;
-    repeated custom_command_argv commands = 2;
-    repeated access_data access_keys      = 3;
+    uint64                       from        = 1;
+    repeated custom_command_argv commands    = 2;
+    repeated access_data         access_keys = 3;
 }
 
 message forward_data {
-    uint64   from           = 1;
-    uint64   to             = 2;
+    uint64          from    = 1;
+    uint64          to      = 2;
     repeated uint64 router  = 3;
     bytes           content = 4;
     uint32          flags   = 5;
@@ -60,12 +60,12 @@ message access_data {
 message channel_data { string address = 1; }
 
 message node_data {
-    uint64   bus_id             = 1;
-    bool     overwrite          = 2;
-    bool     flags              = 3;
-    uint64   children_id_mask   = 4;
-    uint64   children_id_prefix = 5;
-    repeated node_data children = 6;
+    uint64             bus_id             = 1;
+    bool               overwrite          = 2;
+    bool               flags              = 3;
+    uint64             children_id_mask   = 4;
+    uint64             children_id_prefix = 5;
+    repeated node_data children           = 6;
 }
 
 message node_tree { repeated node_data nodes = 1; }
@@ -78,14 +78,16 @@ message subnet_range {
 }
 
 message register_data {
-    uint64   bus_id                  = 1;
-    int32    pid                     = 2;
-    string   hostname                = 3;
-    repeated channel_data channels   = 4;
-    uint32                flags      = 7;
-    repeated access_data access_keys = 8;
-    repeated subnet_range subnets    = 9;
-    string   hash_code               = 10;
+    uint64                bus_id        = 1;
+    int32                 pid           = 2;
+    string                hostname      = 3;
+    repeated channel_data channels      = 4;
+    uint32                flags         = 7;
+    repeated access_data  access_keys   = 8;
+    repeated subnet_range subnets       = 9;
+    string                hash_code     = 10;
+    string                local_address = 11;
+    repeated string       gateways      = 12; // gateway or proxy address list
 }
 
 message connection_data { channel_data address = 1; }

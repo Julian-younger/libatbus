@@ -318,6 +318,32 @@ namespace atbus {
          */
         ATBUS_MACRO_API int disconnect(bus_id_t id);
 
+        /**
+         * @brief 获取入口网关的地址列表
+         * @return 获取入口网关的地址列表
+         */
+        ATBUS_MACRO_API const std::vector<std::string>* get_gateways() const;
+
+        /**
+         * @brief 设置入口网关的地址列表
+         * @return 获取入口网关的地址列表
+         */
+        template<class TContainer>
+        ATBUS_MACRO_API_HEAD_ONLY inline int set_gateways(const TContainer& src) { 
+            if (!self_) {
+                return EN_ATBUS_ERR_NOT_INITED;
+            }
+
+            self_->set_gateways(src);
+            return 0;
+        }
+
+        /**
+         * @brief 随机选取一个入口网关的地址
+         * @return 随机选取一个入口网关的地址
+         */
+        ATBUS_MACRO_API std::string select_gateway() const;
+
 
         /**
          * @brief 发送数据
@@ -451,6 +477,17 @@ namespace atbus {
         ATBUS_MACRO_API const endpoint *get_parent_endpoint() const;
 
         ATBUS_MACRO_API const endpoint_collection_t &get_routes() const;
+
+        ATBUS_MACRO_API ::util::random::xoshiro256_starstar::result_type random();
+
+        template <typename TResultType>
+        ATBUS_MACRO_API_HEAD_ONLY TResultType random_between(TResultType lowest, TResultType highest) {
+            if (highest <= lowest) {
+                return lowest;
+            }
+            ::util::random::xoshiro256_starstar::result_type res = random();
+            return static_cast<TResultType>(res % static_cast<::util::random::xoshiro256_starstar::result_type>(highest - lowest)) + lowest;
+        }
 
         /**
          * @brief 获取关联的事件管理器,如果未设置则会初始化为默认时间管理器
@@ -729,7 +766,8 @@ namespace atbus {
             timer_desc_ls<std::weak_ptr<endpoint> >::type ping_list; // 定时ping
             timer_desc_ls<connection::ptr_t>::type connecting_list;  // 未完成连接（正在网络连接或握手）
 
-            // TODO 改为jiffies_timer定时器和action（销毁、重连、Ping）
+            // TODO 改为jiffies_timer定时器和action（销毁、重连、Ping、重试）
+            //   FIXME 理论上当节点数大于约6000时使用jiffies_timer定时器更优，但是实际应用中通常会设置代理节点，使得不太可能出现直接连接的节点数大于6000
             std::list<endpoint::ptr_t> pending_endpoint_gc_list;     // 待检测GC的endpoint列表
             std::list<connection::ptr_t> pending_connection_gc_list; // 待检测GC的connection列表
         };

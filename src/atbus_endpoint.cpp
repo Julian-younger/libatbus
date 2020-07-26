@@ -232,6 +232,24 @@ namespace atbus {
         hash_code_ = in;
     }
 
+    ATBUS_MACRO_API const std::vector<std::string>& endpoint::get_gateways() const {
+        return gateways_;
+    }
+
+    ATBUS_MACRO_API std::string endpoint::select_gateway() const {
+        if (gateways_.empty()) {
+            return std::string();
+        }
+
+        if (NULL != owner_) {
+            return gateways_[owner_->random_between<size_t>(0, gateways_.size())];
+        }
+
+        ::util::random::xoshiro256_starstar random_engine;
+        random_engine.init_seed(static_cast<uint64_t>(time(NULL)));
+        return gateways_[random_engine.random_between<size_t>(0, gateways_.size())];
+    }
+
     ATBUS_MACRO_API bool endpoint::is_child_node(bus_id_t id) const {
         // id_ == 0 means a temporary node, and has no child
         if (0 == id_) {

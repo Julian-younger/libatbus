@@ -813,6 +813,26 @@ namespace atbus {
         return EN_ATBUS_ERR_ATNODE_NOT_FOUND;
     }
 
+    ATBUS_MACRO_API const std::vector<std::string>* node::get_gateways() const {
+        if (!self_) {
+            return NULL;
+        }
+
+        if (self_->get_gateways().empty()) {
+            return NULL;
+        }
+
+        return &self_->get_gateways();
+    }
+
+    ATBUS_MACRO_API std::string node::select_gateway() const {
+        if (!self_) {
+            return std::string();
+        }
+
+        return self_->select_gateway();
+    }
+
     ATBUS_MACRO_API int node::send_data(bus_id_t tid, int type, const void *buffer, size_t s, bool require_rsp) {
         send_data_options_t options;
         if (require_rsp) {
@@ -1132,7 +1152,7 @@ namespace atbus {
             return false;
         }
 
-        salt            = static_cast<uint32_t>(random_engine_.random());
+        salt            = static_cast<uint32_t>(random());
         uint64_t out[2] = {0};
         ::util::hash::murmur_hash3_x64_128(reinterpret_cast<const void *>(&conf_.access_tokens[idx][0]),
                                            static_cast<int>(conf_.access_tokens[idx].size()), salt, out);
@@ -1186,6 +1206,10 @@ namespace atbus {
     ATBUS_MACRO_API const endpoint *node::get_parent_endpoint() const { return node_parent_.node_.get(); }
 
     ATBUS_MACRO_API const node::endpoint_collection_t &node::get_routes() const { return node_routes_; };
+
+    ATBUS_MACRO_API ::util::random::xoshiro256_starstar::result_type node::random() {
+        return random_engine_.random();
+    }
 
     ATBUS_MACRO_API adapter::loop_t *node::get_evloop() {
         // if just created, do not alloc new event loop
