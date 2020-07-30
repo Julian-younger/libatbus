@@ -59,6 +59,7 @@ namespace atbus {
         using ptr_t = std::shared_ptr<node>;
         using msg_builder_ref_t = ::atbus::protocol::msg &;
         using bus_id_t = ATBUS_MACRO_BUSID_TYPE;
+        using connection_collection_t = detail::auto_select_map<std::string, detail::auto_select_set<connection::ptr_t>::type>::type;
 #else
         typedef connection::clock_type clock_type;
         typedef connection::timepoint_t timepoint_t;
@@ -67,6 +68,7 @@ namespace atbus {
         typedef std::shared_ptr<node> ptr_t;
         typedef ::atbus::protocol::msg & msg_builder_ref_t;
         typedef ATBUS_MACRO_BUSID_TYPE bus_id_t;
+        typedef detail::auto_select_map<std::string, detail::auto_select_set<connection::ptr_t>::type>::type connection_collection_t;
 #endif
         
         struct conf_flag_t {
@@ -141,9 +143,10 @@ namespace atbus {
             size_t send_buffer_number;         /** 发送缓冲区静态Buffer数量限制，0则为动态缓冲区 **/
 
             /** protocol version: 3 **/
-            size_t endpoint_buffer_size;   /** endpoint 内的自动重试缓冲区长度限制 **/
-            size_t endpoint_buffer_number; /** endpoint 内的自动重试缓冲区数量限制 **/
-            size_t endpoint_retry_times;   /** endpoint 内的自动重试次数限制 **/
+            size_t max_endpoint_per_connection; /** 每个connection关联的endpoint数量限制 **/
+            size_t endpoint_buffer_size;        /** endpoint 内的自动重试缓冲区长度限制 **/
+            size_t endpoint_buffer_number;      /** endpoint 内的自动重试缓冲区数量限制 **/
+            size_t endpoint_retry_times;        /** endpoint 内的自动重试次数限制 **/
             /** endpoint 内的自动重试缓冲区超时时间 **/
             duration_t endpoint_buffer_timeout;
             duration_t endpoint_buffer_retry_interval;
@@ -158,19 +161,23 @@ namespace atbus {
             timepoint_t timer;
         };
 
+#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
+        using endpoint_collection_t = std::map<endpoint_subnet_range, endpoint::ptr_t>;
+#else
         typedef std::map<endpoint_subnet_range, endpoint::ptr_t> endpoint_collection_t;
+#endif
 
         struct evt_msg_t {
             // 接收消息事件回调 => 参数列表: 发起节点，来源对端，来源连接，消息体，数据地址，数据长度
-            typedef std::function<int(const node &, const endpoint *, const connection *, const ::atbus::protocol::msg &, const void *,
+            typedef std::function<int(const node &, bus_id_t, const connection *, const ::atbus::protocol::msg &, const void *,
                                       size_t)>
-                on_recv_msg_fn_t;
+                on_forward_request_fn_t;
             // 发送消息失败事件或成功通知回调 => 参数列表: 发起节点，来源对端，来源连接，消息体
             // @note 除非发送时标记atbus::protocol::FORWARD_DATA_FLAG_REQUIRE_RSP为true(即需要通知)，否则成功发送消息默认不回发通知 
-            typedef std::function<int(const node &, const endpoint *, const connection *, const ::atbus::protocol::msg *m)>
+            typedef std::function<int(const node &, bus_id_t, const connection *, const ::atbus::protocol::msg *m)>
                 on_forward_response_fn_t;
-            // 错误回调 => 参数列表: 发起节点，来源对端，来源连接，状态码（通常来自libuv），错误码
-            typedef std::function<int(const node &, const endpoint *, const connection *, int, int)> on_error_fn_t;
+            // 错误回调 => 参数列表: 发起节点，来源对端ID，来源连接，状态码（通常来自libuv），错误码
+            typedef std::function<int(const node &, bus_id_t, const connection *, int, int)> on_error_fn_t;
             // 新对端注册事件回调 => 参数列表: 发起节点，来源对端，来源连接，返回码（通常来自libuv）
             typedef std::function<int(const node &, const endpoint *, const connection *, int)> on_reg_fn_t;
             // 节点关闭事件回调 => 参数列表: 发起节点，下线原因
@@ -182,11 +189,11 @@ namespace atbus {
             typedef std::function<int(const node &, const connection *)> on_new_connection_fn_t;
             // 接收到命令消息事件回调 => 参数列表:
             //      发起节点，来源对端，来源连接，来源节点ID，命令参数列表，返回信息列表（跨节点的共享内存和内存通道的返回消息将被忽略）
-            typedef std::function<int(const node &, const endpoint *, const connection *, bus_id_t,
+            typedef std::function<int(const node &, const connection *, bus_id_t,
                                       const std::vector<std::pair<const void *, size_t> > &, std::list<std::string> &)>
                 on_custom_cmd_fn_t;
             // 接收到命令回包事件回调 => 参数列表: 发起节点，来源对端，来源连接，来源节点ID，回包数据列表，对应请求包的sequence
-            typedef std::function<int(const node &, const endpoint *, const connection *, bus_id_t,
+            typedef std::function<int(const node &, const connection *, bus_id_t,
                                       const std::vector<std::pair<const void *, size_t> > &, uint64_t)>
                 on_custom_rsp_fn_t;
 
@@ -197,7 +204,16 @@ namespace atbus {
             // 对端ping/pong事件回调 => 参数列表: 发起节点，ping/pong的对端，消息体，ping_data
             typedef std::function<int(const node &, const endpoint *, const ::atbus::protocol::msg &, const ::atbus::protocol::ping_data &)> on_ping_pong_endpoint_fn_t;
 
-            on_recv_msg_fn_t on_recv_msg;
+#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
+
+            // 向前兼容申明
+            using on_recv_msg_fn_t = on_forward_request_fn_t;
+#else
+            // 向前兼容申明
+            typedef on_forward_request_fn_t on_recv_msg_fn_t;
+#endif
+
+            on_forward_request_fn_t on_recv_msg;
             on_forward_response_fn_t on_forward_response;
             on_error_fn_t on_error;
             on_reg_fn_t on_reg;
@@ -428,6 +444,13 @@ namespace atbus {
         ATBUS_MACRO_API const endpoint *get_endpoint(bus_id_t tid) const;
 
         /**
+         * @brief 根据对端ID查找路由转发的端点
+         * @param tid 目标端点ID
+         * @return 路由转发的端点，不存在则返回NULL
+         */
+        ATBUS_MACRO_API endpoint *find_route_endpoint(bus_id_t tid);
+
+        /**
          * @brief 添加目标端点
          * @param ep 目标端点
          * @return 0或错误码
@@ -589,20 +612,20 @@ namespace atbus {
 
         ATBUS_MACRO_API void on_recv(connection *conn, ::atbus::protocol::msg ATBUS_MACRO_RVALUE_REFERENCES m, int status, int errcode);
 
-        ATBUS_MACRO_API void on_recv_data(const endpoint *ep, connection *conn, const ::atbus::protocol::msg &m, const void *buffer, size_t s) const;
+        ATBUS_MACRO_API void on_recv_forward_request(bus_id_t ep_id, connection *conn, const ::atbus::protocol::msg &m, const void *buffer, size_t s) const;
 
-        ATBUS_MACRO_API void on_recv_forward_response(const endpoint *, const connection *, const ::atbus::protocol::msg *m);
+        ATBUS_MACRO_API void on_recv_forward_response(bus_id_t ep_id, const connection *, const ::atbus::protocol::msg *m);
 
-        ATBUS_MACRO_API int on_error(const char *file_path, size_t line, const endpoint *, const connection *, int, int);
+        ATBUS_MACRO_API int on_error(const char *file_path, size_t line, bus_id_t ep_id, const connection *, int, int);
         ATBUS_MACRO_API int on_disconnect(const connection *);
         ATBUS_MACRO_API int on_new_connection(connection *);
         ATBUS_MACRO_API int on_shutdown(int reason);
         ATBUS_MACRO_API int on_reg(const endpoint *, const connection *, int);
         ATBUS_MACRO_API int on_actived();
         ATBUS_MACRO_API int on_parent_reg_done();
-        ATBUS_MACRO_API int on_custom_cmd(const endpoint *, const connection *, bus_id_t from,
+        ATBUS_MACRO_API int on_custom_cmd(const connection *, bus_id_t from,
                           const std::vector<std::pair<const void *, size_t> > &cmd_args, std::list<std::string> &rsp);
-        ATBUS_MACRO_API int on_custom_rsp(const endpoint *, const connection *, bus_id_t from,
+        ATBUS_MACRO_API int on_custom_rsp(const connection *, bus_id_t from,
                           const std::vector<std::pair<const void *, size_t> > &cmd_args, uint64_t seq);
 
         ATBUS_MACRO_API int on_ping(const endpoint *ep, const ::atbus::protocol::msg &m, const ::atbus::protocol::ping_data & body);
@@ -620,7 +643,7 @@ namespace atbus {
 
 
         /** do not use this directly **/
-        ATBUS_MACRO_API int fatal_shutdown(const char *file_path, size_t line, const endpoint *, const connection *, int status, int errcode);
+        ATBUS_MACRO_API int fatal_shutdown(const char *file_path, size_t line, bus_id_t ep_id, const connection *, int status, int errcode);
 
         /** dispatch all self messages **/
         ATBUS_MACRO_API int dispatch_all_self_msgs();
@@ -642,11 +665,25 @@ namespace atbus {
 
         ATBUS_MACRO_API void add_connection_gc_list(const connection::ptr_t &conn);
 
-        ATBUS_MACRO_API void set_on_recv_handle(evt_msg_t::on_recv_msg_fn_t fn);
-        ATBUS_MACRO_API const evt_msg_t::on_recv_msg_fn_t &get_on_recv_handle() const;
+        ATBUS_MACRO_API void add_connection(const connection::ptr_t &conn);
 
-        ATBUS_MACRO_API void set_on_receive_handle(evt_msg_t::on_recv_msg_fn_t fn);
-        ATBUS_MACRO_API const evt_msg_t::on_recv_msg_fn_t &get_on_receive_handle() const;
+        ATBUS_MACRO_API bool remove_connection(const connection::ptr_t &conn);
+
+        ATBUS_MACRO_API const connection_collection_t& get_all_connections() const;
+
+        ATBUS_MACRO_API const connection_collection_t::mapped_type* get_connections_by_address(const std::string& address) const;
+
+        ATBUS_MACRO_API const connection_collection_t::mapped_type* get_connections_by_address(const channel::channel_address_t& address) const;
+
+        ATBUS_MACRO_API connection::ptr_t select_idle_connection_by_address(const std::string& address) const;
+
+        ATBUS_MACRO_API connection::ptr_t select_idle_connection_by_address(const channel::channel_address_t& address) const;
+
+        ATBUS_MACRO_API void set_on_recv_handle(evt_msg_t::on_forward_request_fn_t fn);
+        ATBUS_MACRO_API const evt_msg_t::on_forward_request_fn_t &get_on_recv_handle() const;
+
+        ATBUS_MACRO_API void set_on_receive_handle(evt_msg_t::on_forward_request_fn_t fn);
+        ATBUS_MACRO_API const evt_msg_t::on_forward_request_fn_t &get_on_receive_handle() const;
 
         ATBUS_MACRO_API void set_on_forward_response_handle(evt_msg_t::on_forward_response_fn_t fn);
         ATBUS_MACRO_API const evt_msg_t::on_forward_response_fn_t &get_on_forward_response_handle() const;
@@ -790,6 +827,9 @@ namespace atbus {
         // 路由节点
         endpoint_collection_t node_routes_;
 
+        // 连接池
+        connection_collection_t connection_pool_;
+
         // 统计信息
         struct stat_info_t {
             size_t dispatch_times;
@@ -801,7 +841,7 @@ namespace atbus {
 
         // 调试辅助函数
     public:
-        void (*on_debug)(const char *file_path, size_t line, const node &, const endpoint *, const connection *,
+        void (*on_debug)(const char *file_path, size_t line, const node &, bus_id_t, const connection *,
                          const ::atbus::protocol::msg *, const char *fmt, ...);
         friend struct msg_handler;
     };

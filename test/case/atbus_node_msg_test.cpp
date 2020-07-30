@@ -25,7 +25,7 @@
 
 #include <stdarg.h>
 
-static void node_msg_test_on_debug(const char *file_path, size_t line, const atbus::node &n, const atbus::endpoint *ep,
+static void node_msg_test_on_debug(const char *file_path, size_t line, const atbus::node &n, atbus::node::bus_id_t ep_id,
                                    const atbus::connection *conn, const atbus::protocol::msg *, const char *fmt, ...) {
     size_t offset = 0;
     for (size_t i = 0; file_path[i]; ++i) {
@@ -37,7 +37,7 @@ static void node_msg_test_on_debug(const char *file_path, size_t line, const atb
 
     std::streamsize w = std::cout.width();
     CASE_MSG_INFO() << "[Log Debug][" << std::setw(24) << file_path << ":" << std::setw(4) << line << "] node=0x" << std::setfill('0')
-                    << std::hex << std::setw(8) << n.get_id() << ", ep=0x" << std::setw(8) << (NULL == ep ? 0 : ep->get_id())
+                    << std::hex << std::setw(8) << n.get_id() << ", ep=0x" << std::setw(8) << ep_id
                     << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec << "\t";
 
     va_list ap;
@@ -50,21 +50,21 @@ static void node_msg_test_on_debug(const char *file_path, size_t line, const atb
     puts("");
 }
 
-static int node_msg_test_on_error(const atbus::node &n, const atbus::endpoint *ep, const atbus::connection *conn, int status, int errcode) {
+static int node_msg_test_on_error(const atbus::node &n, atbus::node::bus_id_t ep_id, const atbus::connection *conn, int status, int errcode) {
     if (0 == errcode || UV_EOF == errcode || UV_ECONNRESET == errcode) {
         return 0;
     }
 
     std::streamsize w = std::cout.width();
     CASE_MSG_INFO() << "[Log Error] node=0x" << std::setfill('0') << std::hex << std::setw(8) << n.get_id() << ", ep=0x" << std::setw(8)
-                    << (NULL == ep ? 0 : ep->get_id()) << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec
+                    << ep_id << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec
                     << "=> status: " << status << ", errcode: " << errcode << std::endl;
     return 0;
 }
 
 struct node_msg_test_recv_msg_record_t {
     const atbus::node *n;
-    const atbus::endpoint *ep;
+    atbus::node::bus_id_t ep;
     const atbus::connection *conn;
     std::string data;
     int status;
@@ -85,10 +85,10 @@ struct node_msg_test_recv_msg_record_t {
 
 static node_msg_test_recv_msg_record_t recv_msg_history;
 
-static int node_msg_test_recv_msg_test_record_fn(const atbus::node &n, const atbus::endpoint *ep, const atbus::connection *conn,
+static int node_msg_test_recv_msg_test_record_fn(const atbus::node &n, atbus::node::bus_id_t ep_id, const atbus::connection *conn,
                                                  const atbus::protocol::msg &m, const void *buffer, size_t len) {
     recv_msg_history.n      = &n;
-    recv_msg_history.ep     = ep;
+    recv_msg_history.ep     = ep_id;
     recv_msg_history.conn   = conn;
     recv_msg_history.status = m.head().ret();
     ++recv_msg_history.count;
@@ -110,24 +110,24 @@ static int node_msg_test_recv_msg_test_record_fn(const atbus::node &n, const atb
     if (NULL != buffer && len > 0) {
         recv_msg_history.data.assign(reinterpret_cast<const char *>(buffer), len);
         CASE_MSG_INFO() << "[Log Debug] node=0x" << std::setfill('0') << std::hex << std::setw(8) << n.get_id() << ", ep=0x" << std::setw(8)
-                        << (NULL == ep ? 0 : ep->get_id()) << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec << "\t"
+                        << ep_id << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec << "\t"
                         << "recv message: ";
         std::cout.write(reinterpret_cast<const char *>(buffer), len);
         std::cout << std::endl;
     } else {
         recv_msg_history.data.clear();
         CASE_MSG_INFO() << "[Log Debug] node=0x" << std::setfill('0') << std::hex << std::setw(8) << n.get_id() << ", ep=0x" << std::setw(8)
-                        << (NULL == ep ? 0 : ep->get_id()) << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec << "\t"
+                        << ep_id << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec << "\t"
                         << "recv message: [NOTHING]" << std::endl;
     }
 
     return 0;
 }
 
-static int node_msg_test_send_data_forward_response_fn(const atbus::node &n, const atbus::endpoint *ep, const atbus::connection *conn,
+static int node_msg_test_send_data_forward_response_fn(const atbus::node &n, atbus::node::bus_id_t ep_id, const atbus::connection *conn,
                                              const atbus::protocol::msg *m) {
     recv_msg_history.n      = &n;
-    recv_msg_history.ep     = ep;
+    recv_msg_history.ep     = ep_id;
     recv_msg_history.conn   = conn;
     recv_msg_history.status = NULL == m ? 0 : m->head().ret();
     ++recv_msg_history.failed_count;
@@ -269,7 +269,7 @@ CASE_TEST(atbus_node_msg, ping_pong) {
     unit_test_setup_exit(&ev_loop);
 }
 
-static int node_msg_test_recv_msg_test_custom_cmd_fn(const atbus::node &, const atbus::endpoint *, const atbus::connection *,
+static int node_msg_test_recv_msg_test_custom_cmd_fn(const atbus::node &, const atbus::connection *,
                                                      atbus::node::bus_id_t from, const std::vector<std::pair<const void *, size_t> > &data,
                                                      std::list<std::string> &rsp) {
     ++recv_msg_history.count;
@@ -287,7 +287,7 @@ static int node_msg_test_recv_msg_test_custom_cmd_fn(const atbus::node &, const 
     return 0;
 }
 
-static int node_msg_test_recv_msg_test_custom_rsp_fn(const atbus::node &, const atbus::endpoint *, const atbus::connection *,
+static int node_msg_test_recv_msg_test_custom_rsp_fn(const atbus::node &, const atbus::connection *,
                                                      atbus::node::bus_id_t from, const std::vector<std::pair<const void *, size_t> > &data,
                                                      uint64_t seq) {
     ++recv_msg_history.count;
@@ -531,7 +531,7 @@ CASE_TEST(atbus_node_msg, reset_and_send) {
         send_data.assign("self\0hello world!\n", sizeof("self\0hello world!\n") - 1);
 
         int count = recv_msg_history.count;
-        node1->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
+        node1->set_on_receive_handle(node_msg_test_recv_msg_test_record_fn);
         uint64_t data_seq = 0;
         node1->send_data(node1->get_id(), 0, send_data.data(), send_data.size(), &data_seq);
 
@@ -543,7 +543,7 @@ CASE_TEST(atbus_node_msg, reset_and_send) {
     unit_test_setup_exit(&ev_loop);
 }
 
-static int node_msg_test_recv_on_forward_response_error_fn(const atbus::node &, const atbus::endpoint *, const atbus::connection *,
+static int node_msg_test_recv_on_forward_response_error_fn(const atbus::node &, atbus::node::bus_id_t ep_id, const atbus::connection *,
                                                         const atbus::protocol::msg *m) {
     ++recv_msg_history.count;
     if (NULL != m) {
@@ -621,6 +621,7 @@ CASE_TEST(atbus_node_msg, send_loopback_error) {
             m.mutable_head()->set_ret(0);
             m.mutable_head()->set_sequence(node1->alloc_msg_seq());
             m.mutable_head()->set_src_bus_id(0); // fake bad parameter, this should be reset by receiver
+            m.mutable_head()->set_dst_bus_id(0);
 
             m.mutable_data_transform_req()->set_from(node1->get_id());
             m.mutable_data_transform_req()->set_to(0x12346789);
@@ -641,16 +642,16 @@ CASE_TEST(atbus_node_msg, send_loopback_error) {
 }
 
 
-static int node_msg_test_recv_and_send_msg_on_forward_response_fn(const atbus::node &, const atbus::endpoint *, const atbus::connection *,
+static int node_msg_test_recv_and_send_msg_on_forward_response_fn(const atbus::node &, atbus::node::bus_id_t, const atbus::connection *,
                                                         const atbus::protocol::msg *) {
     ++recv_msg_history.count;
     return 0;
 }
 
-static int node_msg_test_recv_and_send_msg_fn(const atbus::node &n, const atbus::endpoint *ep, const atbus::connection *conn,
+static int node_msg_test_recv_and_send_msg_fn(const atbus::node &n, atbus::node::bus_id_t ep_id, const atbus::connection *conn,
                                               const atbus::protocol::msg &m, const void *buffer, size_t len) {
     recv_msg_history.n      = &n;
-    recv_msg_history.ep     = ep;
+    recv_msg_history.ep     = ep_id;
     recv_msg_history.conn   = conn;
     recv_msg_history.status = m.head().ret();
     ++recv_msg_history.count;
@@ -659,14 +660,14 @@ static int node_msg_test_recv_and_send_msg_fn(const atbus::node &n, const atbus:
     if (NULL != buffer && len > 0) {
         recv_msg_history.data.assign(reinterpret_cast<const char *>(buffer), len);
         CASE_MSG_INFO() << "[Log Debug] node=0x" << std::setfill('0') << std::hex << std::setw(8) << n.get_id() << ", ep=0x" << std::setw(8)
-                        << (NULL == ep ? 0 : ep->get_id()) << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec << "\t"
+                        << ep_id << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec << "\t"
                         << "recv message: ";
         std::cout.write(reinterpret_cast<const char *>(buffer), len);
         std::cout << std::endl;
     } else {
         recv_msg_history.data.clear();
         CASE_MSG_INFO() << "[Log Debug] node=0x" << std::setfill('0') << std::hex << std::setw(8) << n.get_id() << ", ep=0x" << std::setw(8)
-                        << (NULL == ep ? 0 : ep->get_id()) << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec << "\t"
+                        << ep_id << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec << "\t"
                         << "recv message: [NOTHING]" << std::endl;
     }
 
@@ -675,7 +676,7 @@ static int node_msg_test_recv_and_send_msg_fn(const atbus::node &n, const atbus:
     sended_data += sended_data;
 
     atbus::node *np = const_cast<atbus::node *>(&n);
-    np->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
+    np->set_on_receive_handle(node_msg_test_recv_msg_test_record_fn);
     np->set_on_forward_response_handle(node_msg_test_recv_and_send_msg_on_forward_response_fn);
 
     np->send_data(n.get_id(), 0, sended_data.c_str(), sended_data.size(), true);
@@ -711,7 +712,7 @@ CASE_TEST(atbus_node_msg, send_msg_to_self_and_need_rsp) {
         send_data.assign("self\0hello world!\n", sizeof("self\0hello world!\n") - 1);
 
         int count = recv_msg_history.count;
-        node1->set_on_recv_handle(node_msg_test_recv_and_send_msg_fn);
+        node1->set_on_receive_handle(node_msg_test_recv_and_send_msg_fn);
         node1->send_data(node1->get_id(), 0, send_data.data(), send_data.size());
 
         CASE_EXPECT_EQ(count + 3, recv_msg_history.count);
@@ -770,8 +771,8 @@ CASE_TEST(atbus_node_msg, parent_and_child) {
         node_parent->proc(proc_t);
         node_child->proc(proc_t);
 
-        node_child->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
-        node_parent->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
+        node_child->set_on_receive_handle(node_msg_test_recv_msg_test_record_fn);
+        node_parent->set_on_receive_handle(node_msg_test_recv_msg_test_record_fn);
 
         int count = recv_msg_history.count;
 
@@ -873,8 +874,8 @@ CASE_TEST(atbus_node_msg, transfer_and_connect) {
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node_child_2->start());
 
         time_t proc_t = time(NULL) + 1;
-        node_child_1->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
-        node_child_2->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
+        node_child_1->set_on_receive_handle(node_msg_test_recv_msg_test_record_fn);
+        node_child_2->set_on_receive_handle(node_msg_test_recv_msg_test_record_fn);
 
         // wait for register finished
         UNITTEST_WAIT_UNTIL(
@@ -955,8 +956,8 @@ CASE_TEST(atbus_node_msg, transfer_only) {
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node_child_2->start());
 
         time_t proc_t = time(NULL) + 1;
-        node_child_1->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
-        node_child_2->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
+        node_child_1->set_on_receive_handle(node_msg_test_recv_msg_test_record_fn);
+        node_child_2->set_on_receive_handle(node_msg_test_recv_msg_test_record_fn);
         node_parent_1->connect("ipv4://127.0.0.1:16388");
 
         // wait for register finished
@@ -1066,7 +1067,7 @@ CASE_TEST(atbus_node_msg, transfer_failed) {
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node_child_1->start());
 
         time_t proc_t = time(NULL) + 1;
-        node_child_1->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
+        node_child_1->set_on_receive_handle(node_msg_test_recv_msg_test_record_fn);
         node_child_1->set_on_forward_response_handle(node_msg_test_send_data_forward_response_fn);
         CASE_EXPECT_TRUE(!!node_child_1->get_on_forward_response_handle());
 
@@ -1146,7 +1147,7 @@ CASE_TEST(atbus_node_msg, transfer_failed_cross_parents) {
         CASE_EXPECT_EQ(EN_ATBUS_ERR_SUCCESS, node_child_1->start());
 
         time_t proc_t = time(NULL) + 1;
-        node_child_1->set_on_recv_handle(node_msg_test_recv_msg_test_record_fn);
+        node_child_1->set_on_receive_handle(node_msg_test_recv_msg_test_record_fn);
         node_child_1->set_on_forward_response_handle(node_msg_test_send_data_forward_response_fn);
         node_child_1->set_on_remove_endpoint_handle(node_msg_test_remove_endpoint_fn);
 

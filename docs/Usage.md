@@ -84,10 +84,10 @@ int main() {
 
         // 设置接收到消息后的回调函数
         bool recved = false;
-        node2->set_on_recv_handle([&recved](const atbus::node &n, const atbus::endpoint *ep, const atbus::connection *conn,
+        node2->set_on_receive_handle([&recved](const atbus::node &n, atbus::node::bus_id_t ep_id, const atbus::connection *conn,
                                             const atbus::msg_t &m, const void *buffer, size_t len) {
-            if (NULL != ep && NULL != conn) {
-                std::cout << "atbus node 0x" << std::ios::hex << n.get_id() << " receive data from 0x" << std::ios::hex << ep->get_id()
+            if (NULL != conn) {
+                std::cout << "atbus node 0x" << std::ios::hex << n.get_id() << " receive data from 0x" << std::ios::hex << ep_id
                           << "(connection: " << conn->get_address().address << "): ";
             }
             std::cout.write(reinterpret_cast<const char *>(buffer), len);

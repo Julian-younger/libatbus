@@ -30,7 +30,7 @@ node_reg_test_destory_protobuf_meta g_protobuf_shutdown_helper;
 
 struct node_reg_test_recv_msg_record_t {
     const atbus::node *n;
-    const atbus::endpoint *ep;
+    atbus::node::bus_id_t ep;
     const atbus::connection *conn;
     std::string data;
     int status;
@@ -53,7 +53,7 @@ struct node_reg_test_recv_msg_record_t {
 
 static node_reg_test_recv_msg_record_t recv_msg_history;
 
-static void node_reg_test_on_debug(const char *file_path, size_t line, const atbus::node &n, const atbus::endpoint *ep,
+static void node_reg_test_on_debug(const char *file_path, size_t line, const atbus::node &n, atbus::node::bus_id_t ep_id,
                                    const atbus::connection *conn, EXPLICIT_UNUSED_ATTR const atbus::protocol::msg *m, const char *fmt,
                                    ...) {
     size_t offset = 0;
@@ -66,7 +66,7 @@ static void node_reg_test_on_debug(const char *file_path, size_t line, const atb
 
     std::streamsize w = std::cout.width();
     CASE_MSG_INFO() << "[Log Debug][" << std::setw(24) << file_path << ":" << std::setw(4) << line << "] node=0x" << std::setfill('0')
-                    << std::hex << std::setw(8) << n.get_id() << ", ep=0x" << std::setw(8) << (NULL == ep ? 0 : ep->get_id())
+                    << std::hex << std::setw(8) << n.get_id() << ", ep=0x" << std::setw(8) << ep_id
                     << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec << "\t";
 
     char log_content[2048] = {0};
@@ -97,28 +97,28 @@ static void node_reg_test_on_debug(const char *file_path, size_t line, const atb
 #endif
 }
 
-static int node_reg_test_on_error(const atbus::node &n, const atbus::endpoint *ep, const atbus::connection *conn, int status, int errcode) {
+static int node_reg_test_on_error(const atbus::node &n, atbus::node::bus_id_t ep_id, const atbus::connection *conn, int status, int errcode) {
     if ((0 == status && 0 == errcode) || UV_EOF == errcode || UV_ECONNRESET == errcode) {
         return 0;
     }
 
     recv_msg_history.n      = &n;
-    recv_msg_history.ep     = ep;
+    recv_msg_history.ep     = ep_id;
     recv_msg_history.conn   = conn;
     recv_msg_history.status = status;
     ++recv_msg_history.register_failed_count;
 
     std::streamsize w = std::cout.width();
     CASE_MSG_INFO() << "[Log Error] node=0x" << std::setfill('0') << std::hex << std::setw(8) << n.get_id() << ", ep=0x" << std::setw(8)
-                    << (NULL == ep ? 0 : ep->get_id()) << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec
+                    << ep_id << ", c=" << conn << std::setfill(' ') << std::setw(w) << std::dec
                     << "=> status: " << status << ", errcode: " << errcode << std::endl;
     return 0;
 }
 
-static int node_reg_test_recv_msg_test_record_fn(const atbus::node &n, const atbus::endpoint *ep, const atbus::connection *conn,
+static int node_reg_test_recv_msg_test_record_fn(const atbus::node &n, atbus::node::bus_id_t ep_id, const atbus::connection *conn,
                                                  const atbus::protocol::msg &m, const void *buffer, size_t len) {
     recv_msg_history.n      = &n;
-    recv_msg_history.ep     = ep;
+    recv_msg_history.ep     = ep_id;
     recv_msg_history.conn   = conn;
     recv_msg_history.status = m.head().ret();
     ++recv_msg_history.count;
@@ -243,7 +243,7 @@ CASE_TEST(atbus_node_reg, reset_and_send_tcp) {
 
 
         int count = recv_msg_history.count;
-        node2->set_on_recv_handle(node_reg_test_recv_msg_test_record_fn);
+        node2->set_on_receive_handle(node_reg_test_recv_msg_test_record_fn);
         CASE_EXPECT_TRUE(!!node2->get_on_recv_handle());
         node1->send_data(node2->get_id(), 0, send_data.data(), send_data.size());
 
@@ -444,7 +444,7 @@ CASE_TEST(atbus_node_reg, message_size_limit) {
 
 
         int count = recv_msg_history.count;
-        node2->set_on_recv_handle(node_reg_test_recv_msg_test_record_fn);
+        node2->set_on_receive_handle(node_reg_test_recv_msg_test_record_fn);
         CASE_EXPECT_TRUE(!!node2->get_on_recv_handle());
         CASE_EXPECT_EQ(0, node1->send_data(node2->get_id(), 0, send_data.data(), send_data.size()));
 
@@ -1490,7 +1490,7 @@ CASE_TEST(atbus_node_reg, mem_and_send) {
 
 
         int count = recv_msg_history.count;
-        node2->set_on_recv_handle(node_reg_test_recv_msg_test_record_fn);
+        node2->set_on_receive_handle(node_reg_test_recv_msg_test_record_fn);
         CASE_EXPECT_TRUE(!!node2->get_on_recv_handle());
         CASE_EXPECT_EQ(0, node1->send_data(node2->get_id(), 0, send_data.data(), send_data.size()));
 
@@ -1656,7 +1656,7 @@ CASE_TEST(atbus_node_reg, shm_and_send) {
 
 
         int count = recv_msg_history.count;
-        node2->set_on_recv_handle(node_reg_test_recv_msg_test_record_fn);
+        node2->set_on_receive_handle(node_reg_test_recv_msg_test_record_fn);
         CASE_EXPECT_TRUE(!!node2->get_on_recv_handle());
         CASE_EXPECT_EQ(0, node1->send_data(node2->get_id(), 0, send_data.data(), send_data.size()));
 

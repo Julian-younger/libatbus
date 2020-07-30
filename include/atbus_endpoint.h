@@ -35,27 +35,6 @@
 #include "atbus_connection.h"
 
 namespace atbus {
-    namespace detail {
-        template <typename TKey, typename TVal>
-        struct auto_select_map {
-#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
-            using type = ATBUS_ADVANCE_TYPE_MAP(TKey, TVal);
-#else
-            typedef ATBUS_ADVANCE_TYPE_MAP(TKey, TVal) type;
-#endif
-        };
-
-        template <typename TVal>
-        struct auto_select_set {
-            
-#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
-            using type = ATBUS_ADVANCE_TYPE_SET(TVal);
-#else
-            typedef ATBUS_ADVANCE_TYPE_SET(TVal) type;
-#endif
-        };
-    } // namespace detail
-
     class node;
 
     struct ATBUS_MACRO_API endpoint_subnet_conf {
@@ -125,17 +104,6 @@ namespace atbus {
 
         struct flag_t {
             typedef ::atbus::protocol::ATBUS_ENDPOINT_FLAG_TYPE type;
-            enum type {
-                RESETTING, /** 正在执行重置（防止递归死循环） **/
-                CONNECTION_SORTED,
-                DESTRUCTING,     /** 正在执行析构 **/
-                HAS_LISTEN_PORC, /** 是否有proc类的listen地址 **/
-                HAS_LISTEN_FD,   /** 是否有fd类的listen地址 **/
-
-                MUTABLE_FLAGS,   /** 可动态变化的属性其实边界 **/
-                HAS_PING_TIMER,  /** 是否设置了ping定时器 **/
-                MAX
-            };
         };
 #endif
 
@@ -189,6 +157,8 @@ namespace atbus {
 
         ATBUS_MACRO_API bool remove_connection(connection *conn);
 
+        ATBUS_MACRO_API bool has_connection(connection *conn) const;
+
         /**
          * @brief 是否处于可用状态
          * @note 可用状态是指同时存在正在运行的命令通道和数据通道
@@ -229,6 +199,8 @@ namespace atbus {
 
         ATBUS_MACRO_API void add_ping_timer();
         ATBUS_MACRO_API void clear_ping_timer();
+
+        ATBUS_MACRO_API void pack(atbus::protocol::register_data& out) const;
     private:
         static bool sort_connection_cmp_fn(const connection::ptr_t &left, const connection::ptr_t &right);
 

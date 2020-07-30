@@ -47,6 +47,27 @@ namespace atbus {
     class node;
     class endpoint;
 
+    namespace detail {
+        template <typename TKey, typename TVal>
+        struct auto_select_map {
+#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
+            using type = ATBUS_ADVANCE_TYPE_MAP(TKey, TVal);
+#else
+            typedef ATBUS_ADVANCE_TYPE_MAP(TKey, TVal) type;
+#endif
+        };
+
+        template <typename TVal>
+        struct auto_select_set {
+            
+#if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
+            using type = ATBUS_ADVANCE_TYPE_SET(TVal);
+#else
+            typedef ATBUS_ADVANCE_TYPE_SET(TVal) type;
+#endif
+        };
+    } // namespace detail
+
     template <typename TObj>
     struct timer_desc_ls {
 #if defined(UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES) && UTIL_CONFIG_COMPILER_CXX_ALIAS_TEMPLATES
@@ -73,11 +94,13 @@ namespace atbus {
         using timepoint_t = clock_type::time_point;
         using duration_t = clock_type::duration;
         using ptr_t = std::shared_ptr<connection>;
+        using endpoint_set_t = detail::auto_select_set<endpoint*>::type;
 #else
         typedef std::chrono::system_clock clock_type;
         typedef clock_type::time_point timepoint_t;
         typedef clock_type::duration duration_t;
         typedef std::shared_ptr<connection> ptr_t;
+        typedef detail::auto_select_set<endpoint*>::type endpoint_set_t;
 #endif
 
         /** 并没有非常复杂的状态切换，所以没有引入状态机 **/
@@ -93,14 +116,15 @@ namespace atbus {
 
         struct flag_t {
             enum type {
-                REG_PROC = 0,      /** 注册了proc记录到node，清理的时候需要移除 **/
-                REG_FD,            /** 关联了fd到node或endpoint，清理的时候需要移除 **/
-                ACCESS_SHARE_ADDR, /** 共享内部地址（内存通道的地址共享） **/
-                ACCESS_SHARE_HOST, /** 共享物理机（共享内存通道的物理机共享） **/
-                RESETTING,         /** 正在执行重置（防止递归死循环） **/
-                DESTRUCTING,       /** 正在执行析构（屏蔽某些接口） **/
-                LISTEN_FD,         /** 是否是用于listen的连接 **/
-                PROXY,             /** 是否是代理连接 **/
+                REG_PROC = 0,          /** 注册了proc记录到node，清理的时候需要移除 **/
+                REG_FD,                /** 关联了fd到node或endpoint，清理的时候需要移除 **/
+                ACCESS_SHARE_ADDR,     /** 共享内部地址（内存通道的地址共享） **/
+                ACCESS_SHARE_HOST,     /** 共享物理机（共享内存通道的物理机共享） **/
+                RESETTING,             /** 正在执行重置（防止递归死循环） **/
+                DESTRUCTING,           /** 正在执行析构（屏蔽某些接口） **/
+                LISTEN,                /** 是否是用于listen的连接 **/
+                RECEIVED_REG_REQUEST,  /** 是否已经收到注册请求(对端注册和连接验证通过) **/
+                RECEIVED_REG_RESPONSE, /** 是否已经收到注册回包(自己注册和连接验证被通过) **/
                 MAX
             };
         };
@@ -196,7 +220,7 @@ namespace atbus {
         /**
          * @brief 获取关联的端点
          */
-        ATBUS_MACRO_API const endpoint *get_binding() const;
+        ATBUS_MACRO_API const endpoint_set_t& get_notify_endpoints() const;
 
         ATBUS_MACRO_API state_t::type get_status() const;
         ATBUS_MACRO_API bool check_flag(flag_t::type f) const;
@@ -214,7 +238,19 @@ namespace atbus {
 
         ATBUS_MACRO_API void remove_owner_checker(const timer_desc_ls<ptr_t>::type::iterator& v);
     private:
+        /**
+         * @brief 添加关联的端点
+         */
+        ATBUS_MACRO_API void add_notify_endpoint(endpoint& ep);
+
+        /**
+         * @brief 移除关联的端点
+         */
+        ATBUS_MACRO_API void remove_notify_endpoint(endpoint& ep);
+
         ATBUS_MACRO_API void set_status(state_t::type v);
+
+        ATBUS_MACRO_API void set_flag(flag_t::type f, bool v);
 
     public:
         static ATBUS_MACRO_API void iostream_on_listen_cb(channel::io_stream_channel *channel, channel::io_stream_connection *connection, int status,
@@ -261,7 +297,7 @@ namespace atbus {
         // 这里不用智能指针是为了该值在上层对象（node或者endpoint）析构时仍然可用
         node *owner_;
         timer_desc_ls<ptr_t>::type::iterator owner_checker_;
-        endpoint *binding_;
+        endpoint_set_t notify_endpoints_;
         std::weak_ptr<connection> watcher_;
 
         struct conn_data_mem {
@@ -303,6 +339,7 @@ namespace atbus {
         stat_t stat_;
 
         friend class endpoint;
+        friend struct msg_handler;
     };
 } // namespace atbus
 

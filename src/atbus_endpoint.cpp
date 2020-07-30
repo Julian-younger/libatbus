@@ -168,7 +168,7 @@ namespace atbus {
 
     ATBUS_MACRO_API endpoint::~endpoint() {
         if (NULL != owner_) {
-            ATBUS_FUNC_NODE_DEBUG(*owner_, this, NULL, NULL, "endpoint deallocated");
+            ATBUS_FUNC_NODE_DEBUG(*owner_, get_id(), NULL, NULL, "endpoint deallocated");
         }
 
         flags_.set(::atbus::protocol::ATBUS_ENDPOINT_FLAG_DESTRUCTING, true);
@@ -188,15 +188,14 @@ namespace atbus {
 
         // 释放连接
         if (ctrl_conn_) {
-            ctrl_conn_->binding_ = NULL;
-            ctrl_conn_->reset();
+            ctrl_conn_->remove_notify_endpoint(*this);
             ctrl_conn_.reset();
         }
 
         // 这时候connection可能在其他地方被引用，不会触发reset函数，所以还是要reset一下
         while (!data_conn_.empty()) {
             std::list<connection::ptr_t>::iterator iter = data_conn_.begin();
-            (*iter)->reset();
+            (*iter)->remove_notify_endpoint(*this);
 
             if (!data_conn_.empty() && data_conn_.begin() == iter) {
                 data_conn_.erase(iter);
@@ -298,26 +297,37 @@ namespace atbus {
             return false;
         }
 
-        if (this == conn->binding_) {
+        if (flags_.test(::atbus::protocol::ATBUS_ENDPOINT_FLAG_DESTRUCTING)) {
+            return false;
+        }
+
+        // 检查是否已有
+        if (ctrl_conn_.get() == conn) {
             return true;
         }
 
-        if (NULL != conn->binding_) {
-            return false;
+        for (std::list<connection::ptr_t>::const_iterator iter = data_conn_.begin(); iter != data_conn_.end(); ++iter) {
+            if ((*iter).get() == conn) {
+                return true;
+            }
         }
 
         if (force_data || ctrl_conn_) {
             data_conn_.push_back(conn->watch());
+            conn->add_notify_endpoint(*this);
             flags_.set(::atbus::protocol::ATBUS_ENDPOINT_FLAG_CONNECTION_SORTED, false); // 置为未排序状态
         } else {
+            if (ctrl_conn_) {
+                ctrl_conn_->remove_notify_endpoint(*this);
+            }
             ctrl_conn_ = conn->watch();
+            if (ctrl_conn_) {
+                ctrl_conn_->add_notify_endpoint(*this);
+            }
         }
 
-        // 已经成功连接可以不需要握手
-        conn->binding_ = this;
-        if (connection::state_t::HANDSHAKING == conn->get_status()) {
-            conn->set_status(connection::state_t::CONNECTED);
-        }
+        // TODO 如果追加的connection本身是CONNECTED的，需要刷新定时器
+
         return true;
     }
 
@@ -326,30 +336,29 @@ namespace atbus {
             return false;
         }
 
-        assert(this == conn->binding_);
-
         // 重置流程会在reset里清理对象，不需要再进行一次查找
         if (flags_.test(::atbus::protocol::ATBUS_ENDPOINT_FLAG_RESETTING)) {
-            conn->binding_ = NULL;
             return true;
         }
 
         bool ret = false;
         if (conn == ctrl_conn_.get()) {
-            ctrl_conn_.reset();
+            // 使用tmp_conn以支持重入
+            connection::ptr_t tmp_conn;
+            tmp_conn.swap(ctrl_conn_);
+            tmp_conn->remove_notify_endpoint(*this);
             ret = true;
         }
-
-        // TODO 检查是否是代理连接,代理连接可能是纯连接，也可能是代理节点
 
         // 每个节点的连接数不会很多，并且连接断开时是个低频操作
         // 所以O(n)的复杂度并没有关系
         for (std::list<connection::ptr_t>::iterator iter = data_conn_.begin(); iter != data_conn_.end(); ++iter) {
             if ((*iter).get() == conn) {
-                conn->binding_ = NULL;
+                // 使用tmp_conn以支持重入
+                connection::ptr_t tmp_conn = *iter;
                 data_conn_.erase(iter);
+                tmp_conn->remove_notify_endpoint(*this);
 
-                
                 ret = true;
                 break;
             }
@@ -361,7 +370,6 @@ namespace atbus {
          *   内存和共享内存通道不会被动下线
          *   如果任意tcp通道被动下线或者存在内存或共享内存通道则无需下线
          *   因为通常来说内存或共享内存通道就是最快的通道
-         * TODO 存在代理连接则不需要下线
          * 手动维护的节点不需要自动下线
         **/
         if (!get_flag(atbus::protocol::ATBUS_ENDPOINT_FLAG_CUSTOM_LIFETIME)) {
@@ -371,6 +379,20 @@ namespace atbus {
         }
 
         return ret;
+    }
+
+    ATBUS_MACRO_API bool endpoint::has_connection(connection *conn) const {
+        if (conn == ctrl_conn_.get()) {
+            return true;
+        }
+
+        for (std::list<connection::ptr_t>::const_iterator iter = data_conn_.begin(); iter != data_conn_.end(); ++iter) {
+            if ((*iter).get() == conn) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     ATBUS_MACRO_API bool endpoint::is_available() const {
@@ -454,6 +476,69 @@ namespace atbus {
 
         node_access_controller::remove_ping_timer(*owner_, ping_timer_);
         set_flag(::atbus::protocol::ATBUS_ENDPOINT_FLAG_HAS_PING_TIMER, false);
+    }
+
+    ATBUS_MACRO_API void endpoint::pack(atbus::protocol::register_data& out) const {
+        // listen
+        const std::list<std::string>& listens = get_listen();
+        out.mutable_channels()->Reserve(static_cast<int>(listens.size()));
+        for (std::list<std::string>::const_iterator iter = listens.begin(); iter != listens.end(); ++iter) {
+            ::atbus::protocol::channel_data* chan = out.add_channels();
+            if (chan == NULL) {
+                continue;
+            }
+            chan->set_address(*iter);
+        }
+
+        // access_keys
+        if (NULL != owner_) {
+            out.mutable_access_keys()->Reserve(static_cast<int>(owner_->get_conf().access_tokens.size()));
+            for (size_t idx = 0; idx < owner_->get_conf().access_tokens.size(); ++idx) {
+                uint32_t salt     = 0;
+                uint64_t hashval1 = 0;
+                uint64_t hashval2 = 0;
+                if (owner_->generate_access_hash(idx, salt, hashval1, hashval2)) {
+                    ::atbus::protocol::access_data* access = out.add_access_keys();
+                    if (access == NULL) {
+                        continue;
+                    }
+                    access->set_token_salt(salt);
+                    access->set_token_hash1(hashval1);
+                    access->set_token_hash2(hashval2);
+                }
+            }
+        }
+
+        out.set_bus_id(get_id());
+        out.set_pid(get_pid());
+        out.set_hostname(get_hostname());
+
+        // subnets
+        const std::vector<endpoint_subnet_range>& subsets = get_subnets();
+        for (size_t i = 0; i < subsets.size(); ++ i) {
+            atbus::protocol::subnet_range* subset = out.add_subnets();
+            if (NULL == subset) {
+                if (NULL != owner_) {
+                    ATBUS_FUNC_NODE_ERROR(*owner_, get_id(), NULL, EN_ATBUS_ERR_MALLOC, EN_ATBUS_ERR_MALLOC);
+                }
+                break;
+            }
+
+            subset->set_id_prefix(subsets[i].get_id_prefix());
+            subset->set_mask_bits(subsets[i].get_mask_bits());
+        }
+
+        // flags
+        out.set_flags(get_flags());
+
+        // hash code
+        out.set_hash_code(get_hash_code());
+
+        // gateways
+        const std::vector<std::string>& gateways = get_gateways();
+        for (size_t i = 0; i < gateways.size(); ++ i) {
+            out.add_gateways(gateways[i]);
+        }
     }
 
     bool endpoint::sort_connection_cmp_fn(const connection::ptr_t &left, const connection::ptr_t &right) {
